@@ -25,13 +25,23 @@ side, so do NOT add a full ROS2PublishTransformTree here — it would fight it.
 
 import argparse
 
-# ---- TODO: fill these in once the TB3 USD exists -----------------------------
-# There is no TurtleBot3 asset shipped with Isaac Sim; import the URDF with the
-# URDF importer first (see skills/urdf-mjcf-to-usd-conversion) and save it under
-# isaac/scenes/. Then set these to the real prim paths.
+# Verified against a real import: isaac/scripts/import_tb3.py expands the
+# turtlebot3_description xacro, runs it through URDFImporter
+# (merge_fixed_joints=True, fix_base=False), and references the result into
+# isaac/scenes/tb3_world.usd at ROBOT_PRIM below — that is the --stage this
+# file expects.
 ROBOT_PRIM = '/World/turtlebot3'
-CHASSIS_PRIM = f'{ROBOT_PRIM}/base_footprint'
-LIDAR_PRIM = f'{ROBOT_PRIM}/base_scan/lidar'
+# NOT '{ROBOT_PRIM}/base_footprint' — the importer nests visual/collision
+# geometry (and the merged-in fixed-joint links) under a Geometry scope.
+CHASSIS_PRIM = f'{ROBOT_PRIM}/Geometry/base_footprint'
+# merge_fixed_joints=True collapses base_joint/caster_back_joint/imu_joint/
+# scan_joint into base_footprint's single rigid body, so there is no
+# standalone base_scan prim to hang a sensor off of the way this path
+# implies — the lidar's visual geometry survives as .../base_footprint/lds
+# (its URDF link name), not base_scan (its ROS *frame* name; those diverge
+# once the joint that would have made it a separate body is merged away).
+# Point the RTX lidar there once build_lidar() below is implemented.
+LIDAR_PRIM = f'{ROBOT_PRIM}/Geometry/base_footprint/lds'
 WHEEL_JOINTS = ['wheel_left_joint', 'wheel_right_joint']
 
 # Frame set the other two backends produce, from turtlebot3_description

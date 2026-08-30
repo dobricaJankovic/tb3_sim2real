@@ -38,3 +38,18 @@
   Gazebo master port. Next `gzserver` start fails: `Unable to start
   server[bind: Address already in use]`. Kill it by explicit PID
   (`kill -9 <pid>`) before retrying.
+- **UNRESOLVED — real TB3 topics invisible from the dev machine.** `ros2
+  topic list` on the ETF network host only ever shows local topics
+  (`/parameter_events`, `/rosout`), never the real robot's, even though
+  `ROS_DOMAIN_ID=30` matches and both `tb3_ros_dev` containers run
+  `--network host`. `ssh` and `ping` to the robot work fine (`ttl=63`, one
+  router hop via `10.118.5.1`) — it's on a different `/24` than this host
+  (`10.118.5.245/24` vs `10.118.19.161`). ROS 2's default discovery
+  (`rmw_fastrtps_cpp`, SPDP) announces over UDP multicast, which campus-network
+  routers don't forward across subnets/VLANs. Unicast works, multicast
+  discovery doesn't — that's the whole bug. Not a Docker issue (network mode
+  is already `host`). Fix is one of: a Fast-DDS Discovery Server
+  (`ROS_DISCOVERY_SERVER`, unicast, no new packages), or switch to
+  `rmw_cyclonedds_cpp` with an explicit static-peer `cyclonedds.xml` pointing
+  at both machines' IPs. Needs doing on both the dev host and the robot —
+  picking it up later.

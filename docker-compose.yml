@@ -26,11 +26,19 @@ services:
       - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-30}
       - DISPLAY=${DISPLAY}
       - QT_X11_NO_MITSHM=1
-      # ROS_DISTRO deliberately unset -> isaacsim.ros2.core falls back to its
-      # bundled Humble libs (internal_lib_fallback=True). This is the supported path.
+      # Verified against a live probe: leaving ROS_DISTRO unset does NOT make
+      # isaacsim.ros2.core fall back cleanly — it logs "ROS2 Bridge startup
+      # failed" (librmw_implementation.so -> missing libament_index_cpp.so)
+      # and the bridge silently never talks DDS. Its own error message names
+      # this exact fix. Also: the bundled distro is Jazzy, not Humble — that's
+      # fine, FastDDS is wire-compatible across ROS 2 versions and tb3_ros
+      # already defaults to rmw_fastrtps_cpp.
+      - ROS_DISTRO=jazzy
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+      - LD_LIBRARY_PATH=/isaac-sim/exts/isaacsim.ros2.core/jazzy/lib
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
-      - ./isaac/scenes:/scenes:ro
+      - ./isaac/scenes:/scenes   # rw: build_scene.py's --save and the URDF importer both write here
       - ./isaac/scripts:/scripts:ro
     deploy:
       resources:
@@ -59,7 +67,13 @@ services:
       # the usual path.dsv/ament_prefix_path.dsv), so gzserver can't resolve
       # <uri>model://turtlebot3_world without this — a standard TurtleBot3
       # e-manual .bashrc step, needed here since the container has no .bashrc.
-      - GAZEBO_MODEL_PATH=/opt/ros/humble/share/turtlebot3_gazebo/models
+      # Prepended, not a replacement: it must stay alongside Gazebo's own
+      # default /usr/share/gazebo-11/models, which is where model://ground_plane
+      # and model://sun live. Setting this var wipes that default out, and with
+      # GAZEBO_MODEL_DATABASE_URI emptied below there's no fallback fetch left
+      # either — the robot spawns into a world with no ground plane and falls
+      # through forever.
+      - GAZEBO_MODEL_PATH=/opt/ros/humble/share/turtlebot3_gazebo/models:/usr/share/gazebo-11/models
       # gzserver's ModelDatabase does a synchronous fetch from
       # models.gazebosim.org on startup to refresh its local model cache
       # metadata, independent of GAZEBO_MODEL_PATH above. In this network it
