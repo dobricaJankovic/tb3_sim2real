@@ -55,6 +55,17 @@ services:
       - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-30}
       - TURTLEBOT3_MODEL=${TURTLEBOT3_MODEL:-burger}
       - LDS_MODEL=${LDS_MODEL:-LDS-02}
+      # ros-humble-turtlebot3-gazebo ships no Gazebo-specific ament hook (only
+      # the usual path.dsv/ament_prefix_path.dsv), so gzserver can't resolve
+      # <uri>model://turtlebot3_world without this — a standard TurtleBot3
+      # e-manual .bashrc step, needed here since the container has no .bashrc.
+      - GAZEBO_MODEL_PATH=/opt/ros/humble/share/turtlebot3_gazebo/models
+      # gzserver's ModelDatabase does a synchronous fetch from
+      # models.gazebosim.org on startup to refresh its local model cache
+      # metadata, independent of GAZEBO_MODEL_PATH above. In this network it
+      # hangs rather than failing fast, so /spawn_entity never comes up.
+      # Emptying the URI skips it; models already resolve fine locally.
+      - GAZEBO_MODEL_DATABASE_URI=
       - DISPLAY=${DISPLAY}
       - QT_X11_NO_MITSHM=1
     volumes:
@@ -66,3 +77,9 @@ services:
     command: bash
     stdin_open: true
     tty: true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]         # gzserver/gzclient GLX rendering needs the real driver,
+                                           # not the nouveau fallback picked up without this
