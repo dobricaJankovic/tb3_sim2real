@@ -39,10 +39,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-${ROS_DISTRO}-turtlebot3-msgs \
     ros-${ROS_DISTRO}-turtlebot3 \
+    ros-${ROS_DISTRO}-turtlebot3-description \
+    ros-${ROS_DISTRO}-turtlebot3-bringup \
+    ros-${ROS_DISTRO}-turtlebot3-navigation2 \
     ros-${ROS_DISTRO}-turtlebot3-simulations \
+    ros-${ROS_DISTRO}-turtlebot3-gazebo \
     ros-${ROS_DISTRO}-dynamixel-sdk \
     ros-${ROS_DISTRO}-hls-lfcd-lds-driver \
     ros-${ROS_DISTRO}-ld08-driver \
+    ros-${ROS_DISTRO}-coin-d4-driver \
  && rm -rf /var/lib/apt/lists/*
 
 # TODO: if we end up needing the local turtlebot3_ws sources instead of the

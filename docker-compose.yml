@@ -45,7 +45,9 @@ services:
       context: ./docker/ros
       dockerfile: Dockerfile
     image: tb3_sim2real/ros:humble
-    container_name: tb3_ros
+    # no container_name: we mostly `docker compose run --rm tb3_ros`, which
+    # ignores it and warns. Use `docker compose exec` against `up -d` if you
+    # want a stable name.
     network_mode: host
     ipc: host
     privileged: true                      # /dev/ttyACM0 + lidar USB for the real robot
