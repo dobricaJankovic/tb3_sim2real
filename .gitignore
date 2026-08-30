@@ -1,0 +1,19 @@
+# colcon
+build/
+install/
+log/
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# large sim assets — keep scenes out of git until we decide on LFS
+isaac/scenes/*.usd
+isaac/scenes/*.usda
+isaac/scenes/*.usdc
+!isaac/scenes/.gitkeep
+
+# local env overrides
+.env
+docker-compose.override.yml

@@ -1,0 +1,10 @@
+# Nav2 parameters — real backend.
+#
+# PLACEHOLDER. Populate with:
+#     scripts/seed_nav2_params.sh
+# which copies the stock turtlebot3_navigation2 params here as a starting point.
+#
+# Then, in this file: use_sim_time: false — wall clock, real hardware
+#
+# Keep the three nav2_*.yaml files structurally identical and let only the
+# TUNING diverge. That delta is the sim-to-real gap made measurable.

@@ -1,0 +1,23 @@
+# PLACEHOLDER RViz config.
+#
+# Replace by opening RViz, adding the displays below, and File > Save Config As
+# over this file. One config serves all three backends.
+#
+#   Fixed Frame: map
+#   - Map            /map
+#   - LaserScan      /scan          (QoS: Best Effort)
+#   - TF
+#   - RobotModel     /robot_description
+#   - Odometry       /odom
+#   - Path           /plan, /local_plan
+#   - Costmap        /global_costmap/costmap, /local_costmap/costmap
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Global Options:
+    Fixed Frame: map
+  Displays:
+    - Class: rviz_default_plugins/TF
+      Enabled: true
+      Name: TF
