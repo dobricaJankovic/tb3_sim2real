@@ -34,7 +34,14 @@ CHASSIS_PRIM = f'{ROBOT_PRIM}/base_footprint'
 LIDAR_PRIM = f'{ROBOT_PRIM}/base_scan/lidar'
 WHEEL_JOINTS = ['wheel_left_joint', 'wheel_right_joint']
 
-# Match the physical LDS-02 or Nav2 will behave differently between backends.
+# Frame set the other two backends produce, from turtlebot3_description
+# expanded with an empty namespace. Isaac Sim must match these exactly —
+# a single wrong character leaves Nav2's costmap silently empty.
+#   base_footprint, base_link, base_scan, caster_back_link,
+#   imu_link, wheel_left_link, wheel_right_link
+
+# Verified against the burger URDF: wheel joints sit at y = +/-0.080,
+# so separation is 0.160. Radius 0.033 is the stock burger wheel.
 WHEEL_RADIUS = 0.033
 WHEEL_BASE = 0.160
 
