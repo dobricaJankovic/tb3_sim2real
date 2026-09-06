@@ -13,13 +13,20 @@ worlds/<name>/
   meshes/          shared geometry      committed
   <name>.world     generated (SDF)      committed  <- Gazebo
   model.config     generated            committed  <- makes model:// resolve
-  <name>.usd       generated (USD)      gitignored <- Isaac Sim
-  _converted/      mesh->USD cache      gitignored
+  isaac/           generated, gitignored  <- Isaac Sim
+    <name>.usd     the stage tb3_sim.py references
+    _converted/    mesh->USD cache
 ```
 
 The `.world` is committed because it is reviewable text and it means the Gazebo
 backend needs no build step. The `.usd` is not, because it is a build product
 that can only be produced inside the isaacsim container.
+
+Isaac's output is confined to `isaac/` because that container runs as uid 1234
+while your checkout is yours, so its output directory has to be world-writable.
+Keeping that to one subdirectory leaves `world.yaml` and `meshes/` at normal
+permissions. `scripts/build_world_usd.sh` creates it: git records no directory
+modes, so this cannot be fixed by committing anything.
 
 ## Using one
 
@@ -64,9 +71,7 @@ would imply the ROS side can change what the simulator loaded, and it cannot.
 
    ```bash
    scripts/build_world.py my_office                      # -> my_office.world
-   WORLD=my_office docker compose run --rm \
-     --entrypoint /isaac-sim/python.sh isaacsim \
-     /scripts/build_world_usd.py                          # -> my_office.usd
+   scripts/build_world_usd.sh my_office                  # -> isaac/my_office.usd
    ```
 
 5. `world:=my_office` / `WORLD=my_office`. No launch file changes.

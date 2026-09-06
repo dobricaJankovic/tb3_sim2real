@@ -30,6 +30,7 @@ reference graph in
 """
 
 import argparse
+import math
 import os
 import sys
 
@@ -37,6 +38,16 @@ from isaacsim import SimulationApp
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--stage', default='/scenes/tb3_world.usd')
+# The environment, by registry name (worlds/<name>/). This is the isaacsim
+# counterpart of `bringup.launch.py world:=` — Isaac Sim runs in its own
+# container, so the world is chosen here rather than by the ROS-side launch,
+# which only attaches over DDS. Defaults to $WORLD, set in docker-compose.yml.
+parser.add_argument('--world', default=os.environ.get('WORLD', 'turtlebot3_world'),
+                    help='environment from the world registry; "" or --no-world '
+                         'for the bare ground plane')
+parser.add_argument('--no-world', action='store_true',
+                    help='Skip the environment. Useful to tell an environment '
+                         'problem apart from a robot or graph problem.')
 parser.add_argument('--headless', action='store_true')
 parser.add_argument('--no-lidar', action='store_true',
                     help='Skip the RTX lidar so a lidar failure can be isolated '
@@ -54,6 +65,10 @@ import usdrt.Sdf
 from isaacsim.core.simulation_manager import SimulationManager
 
 ROBOT_PRIM = '/World/turtlebot3'
+# The environment is referenced in here rather than baked into tb3_world.usd, so
+# changing world never means regenerating the robot stage.
+WORLD_PRIM = '/World/env'
+WORLDS_ROOT = os.environ.get('TB3_WORLDS_DIR', '/worlds')
 # The importer puts PhysicsArticulationRootAPI on base_footprint, not on the
 # reference prim above it. IsaacComputeOdometry, IsaacArticulationController and
 # ROS2PublishJointState all want the articulation root, so they get this.
@@ -225,6 +240,84 @@ def attach_lidar():
     return sensor
 
 
+def set_pose(prim_path: str, xyz, yaw: float) -> None:
+    """Place a prim, coping with xformOps a reference already authored.
+
+    XformCommonAPI cannot author a rotateXYZ over an `orient` op — and it says
+    so by returning False, not by raising, so an unchecked call leaves the robot
+    at the origin and the run merely looks odd. The robot prim is a reference,
+    so it does carry the asset's own ops; fall back to writing them directly.
+    """
+    from pxr import Gf, UsdGeom
+
+    prim = omni.usd.get_context().get_stage().GetPrimAtPath(prim_path)
+    xf = UsdGeom.XformCommonAPI(prim)
+    deg = math.degrees(yaw)
+    if (xf.SetTranslate(Gf.Vec3d(*[float(v) for v in xyz]))
+            and xf.SetRotate(Gf.Vec3f(0.0, 0.0, deg),
+                             UsdGeom.XformCommonAPI.RotationOrderXYZ)):
+        return
+
+    ops = {op.GetOpName(): op for op in UsdGeom.Xformable(prim).GetOrderedXformOps()}
+    translate = ops.get('xformOp:translate')
+    if translate is None:
+        raise RuntimeError(f'cannot place {prim_path}: no translate op and '
+                           f'XformCommonAPI refused ({list(ops)})')
+    translate.Set(Gf.Vec3d(*[float(v) for v in xyz]))
+    orient = ops.get('xformOp:orient')
+    if orient is not None:
+        half = yaw / 2.0
+        q = Gf.Quatd(math.cos(half), Gf.Vec3d(0.0, 0.0, math.sin(half)))
+        orient.Set(Gf.Quatf(q) if orient.GetTypeName() == 'quatf' else q)
+    elif yaw:
+        raise RuntimeError(f'cannot rotate {prim_path}: no orient op ({list(ops)})')
+
+
+def load_world(name: str) -> None:
+    """Reference the registry's generated stage in, and spawn the robot in it.
+
+    The environment is a separate USD referenced at WORLD_PRIM rather than baked
+    into tb3_world.usd, so switching worlds never regenerates the robot stage.
+    Both come from worlds/<name>/, the same directory Gazebo reads.
+    """
+    import yaml
+    from isaacsim.core.utils.stage import add_reference_to_stage
+
+    world_dir = os.path.join(WORLDS_ROOT, name)
+    usd = os.path.join(world_dir, 'isaac', f'{name}.usd')
+    manifest_path = os.path.join(world_dir, 'world.yaml')
+
+    if not os.path.isfile(manifest_path):
+        avail = sorted(n for n in os.listdir(WORLDS_ROOT)
+                       if os.path.isfile(os.path.join(WORLDS_ROOT, n, 'world.yaml'))
+                       ) if os.path.isdir(WORLDS_ROOT) else []
+        raise RuntimeError(
+            f"unknown world '{name}': no {manifest_path}\n"
+            f'  registry: {WORLDS_ROOT} (available: {", ".join(avail) or "(none)"})\n'
+            f'  If that is empty, the worlds volume is not mounted.')
+    if not os.path.isfile(usd):
+        raise RuntimeError(
+            f"world '{name}' has no generated stage at {usd}\n"
+            f'  Build it first, from the host:  scripts/build_world_usd.sh {name}\n'
+            f'  (The .usd is gitignored, so a fresh clone never has one.)')
+
+    add_reference_to_stage(usd_path=usd, prim_path=WORLD_PRIM)
+    simulation_app.update()
+
+    with open(manifest_path) as f:
+        manifest = yaml.safe_load(f)
+    spawn = manifest.get('spawn') or {}
+    xyz = list(spawn.get('xyz', [0.0, 0.0, 0.0]))
+    xyz += [0.0] * (3 - len(xyz))
+    yaw = float(spawn.get('yaw', 0.0))
+
+    # Same spawn pose Gazebo uses, from the same manifest. Without this the
+    # robot starts at the origin, which in turtlebot3_world is inside a pillar.
+    set_pose(ROBOT_PRIM, xyz, yaw)
+    print(f'world: {name} at {WORLD_PRIM}, robot spawned at '
+          f'{[round(v, 3) for v in xyz]} yaw {yaw:g}', flush=True)
+
+
 def main() -> None:
     app_utils.enable_extension('isaacsim.ros2.bridge')
     simulation_app.update()
@@ -237,6 +330,11 @@ def main() -> None:
     if not prim_utils.get_prim_at_path(ARTICULATION_ROOT).IsValid():
         raise RuntimeError(f'{ARTICULATION_ROOT} missing from {args.stage} — '
                            'run import_tb3.py, then verify_asset.py')
+
+    if args.world and not args.no_world:
+        load_world(args.world)
+    else:
+        print('world: none (bare ground plane)', flush=True)
 
     build_graph()
     # Bound to a name for its lifetime, not discarded — see attach_lidar().

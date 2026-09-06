@@ -12,6 +12,24 @@ colcon build --symlink-install && source install/setup.bash
 ros2 launch tb3_bringup bringup.launch.py backend:=gazebo
 ```
 
+## Environments
+
+Worlds come from the registry in `worlds/`, not from `turtlebot3_gazebo`'s
+installed worlds. `worlds/<name>/world.yaml` is the source of truth and both
+simulators' wrappers are generated from it — see `worlds/README.md`.
+
+The Gazebo `.world` is committed, so `backend:=gazebo` needs no build step. The
+Isaac Sim `.usd` is gitignored and must be built once per clone, per world:
+
+```bash
+scripts/build_world_usd.sh turtlebot3_world   # ~1 min, needs the isaacsim image
+```
+
+Skipping it does not fail quietly: `tb3_sim.py` checks for the generated stage
+and names this command. Rebuild it after editing a manifest or its meshes; also
+rerun `scripts/build_world.py <name>` for the Gazebo side, since editing the
+manifest alone changes neither generated file.
+
 ## X11 for the GUI containers
 
 Neither container runs as *you*, but the host X server's access control is
