@@ -16,7 +16,14 @@
   subscriber against a Best Effort publisher shows up in `ros2 topic list` while
   delivering nothing.
 - **X11 for two containers.** Both Isaac Sim and RViz need `DISPLAY` and
-  `/tmp/.X11-unix`. `xhost +local:docker` on the host if you hit permission errors.
+  `/tmp/.X11-unix`. Both containers run as root, but host X access control is
+  per-UID (`xhost` shows `SI:localuser:<you>`, not root), so the socket mount
+  alone isn't enough — `gzclient`/RViz/Kit abort with "Authorization required,
+  but no authorization protocol specified". Run `docker/x11-auth.sh` once per
+  X session before `docker compose up/run` — it writes a re-keyed Xauthority
+  cookie that compose mounts to `/root/.Xauthority` (`XAUTHORITY` env var) in
+  both services. (`xhost +local:root` also works but permanently loosens
+  host X access control instead of scoping a cookie.)
 - **No GPU in `tb3_ros`.** Without a `deploy.resources.reservations.devices:
   [gpu]` block (compose has it now), `gzserver`/`gzclient` silently fall back
   to `nouveau` and die with `libGL error: failed to load driver: nouveau`.
@@ -53,3 +60,14 @@
   `rmw_cyclonedds_cpp` with an explicit static-peer `cyclonedds.xml` pointing
   at both machines' IPs. Needs doing on both the dev host and the robot —
   picking it up later.
+- **UNRESOLVED — Isaac Sim GUI shows a blank viewport.** `isaac/scenes/tb3_world.usd`
+  and `turtlebot3_burger.usd` (see `isaac/scripts/import_tb3.py`) both open fine
+  via File -> Open — no error, the stage loads — but nothing renders in the
+  viewport. The main Kit process (`isaacsim` service, `runapp.sh`) is confirmed
+  running and the host X server is confirmed reachable (`DISPLAY=:1`,
+  `xdpyinfo` succeeds), so it's not a dead process or unreachable X11. A scan of
+  recent container logs turned up nothing RTX/GPU-specific, only unrelated
+  asset-browser `PermissionError`s (`/home/ubuntu/workspace_cache.json`,
+  populating `/home/ubuntu`) — those are the file browser panel, not the
+  viewport renderer, and don't obviously explain it. Not investigated further
+  yet; picking it up later.
