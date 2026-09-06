@@ -11,11 +11,43 @@ this package. They only ever meet on the DDS wire.
 Python code had to run *inside* Kit's interpreter. It doesn't — Isaac Sim's
 OmniGraph ROS 2 nodes are C++ against bundled libs that include
 `libfastrtps.so.2.6.10`, the same Fast-DDS version stock Humble ships. Same RTPS,
-same Humble message definitions. A single container is also blocked outright:
-`isaacsim-6.0/tools/docker/Dockerfile` is `FROM nvcr.io/nvidia/base/ubuntu:noble`,
-and Humble has no binaries for noble.
+same Humble message definitions.
 
 Full write-up: <https://claude.ai/code/artifact/f7809bfe-4918-4977-938c-e008f28c46e3>
+
+## Why not one container
+
+Tested on 2026-09-06 rather than assumed; both images were built and run. The
+work is on the `isaacsim-ros2-single-container` branch and the evidence is
+written up at
+<https://claude.ai/code/artifact/6a079cb9-a3bf-4c3f-bb70-06e37f1d4e96>.
+
+The Python 3.10 / 3.12 difference is *not* what prevents it — see above, and Kit
+bundles its own interpreter anyway. Two things do:
+
+1. **On 22.04 it cannot work with NVIDIA's binaries.** Kit itself is portable,
+   and so are 1095 of the 1104 shared objects under `/isaac-sim/exts`. Nine
+   require `GLIBC_2.38`, which only noble provides, and three of those nine are
+   the bridge: `libisaacsim.ros2.core.humble.so`, `libisaacsim.ros2.core.jazzy.so`
+   and `libisaacsim.ros2.nodes.plugin.so`. Both bundled distros fail identically,
+   so this is NVIDIA's build host, not a Humble/Jazzy question.
+2. **Where it *would* work, it is still the wrong trade.** Building Isaac Sim
+   from source on jammy would fix the nine, and the same image on noble/Jazzy
+   already passes end to end — so this is a choice, not a limit. It means owning
+   an unofficial build of the simulator, redone on every Isaac Sim release, on a
+   configuration NVIDIA does not ship. Prefer the official artifact.
+
+The simplification on offer is also smaller than it looks. Merging does not
+remove the interpreter problem: Isaac Sim's `setup_python_env.sh` *appends* to
+`PYTHONPATH`/`LD_LIBRARY_PATH`, so a sourced ROS 2 stays ahead of Kit's own
+entries and Kit loads the wrong modules. A merged container needs a wrapper
+stripping `/opt/ros` back out on every launch. And the two real wins — shared
+memory DDS instead of UDP loopback, one X11 cookie path instead of two — come
+from the images running as *different uids* (1234 vs root), not from being
+separate containers. Aligning the uids gets both without touching this design.
+
+Note that a single-command launch never required a single container; that goal
+is reachable across the container boundary.
 
 ## Layout
 
