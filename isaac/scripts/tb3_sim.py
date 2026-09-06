@@ -71,10 +71,9 @@ WHEEL_BASE = 0.160
 # not turtlebot3_gazebo's model.sdf (which says 0.171): robot_state_publisher
 # owns this transform in every backend, and it reads the URDF.
 SCAN_OFFSET = (-0.032, 0.0, 0.182)
-# Matches turtlebot3_gazebo's hls_lfcd_lds sensor exactly, so /scan geometry is
-# identical across backends: 360 samples over 360 deg at 5 Hz, 0.12-3.5 m.
-SCAN_HZ = 5.0
-SCAN_SAMPLES = 360
+# turtlebot3_gazebo's hls_lfcd_lds publishes 360 samples over 360 deg at 5 Hz
+# across 0.12-3.5 m. Only the ranges are enforced here — see attach_lidar() for
+# why the rates are left to the sensor config.
 SCAN_RANGE_MIN = 0.12
 SCAN_RANGE_MAX = 3.5
 
@@ -169,21 +168,30 @@ def attach_lidar():
     """
     from isaacsim.sensors.experimental.rtx import Lidar, LidarSensor
 
-    # Example_Rotary_2D is a 200 m survey lidar out of the box — near range 1.0 m
-    # would make the robot blind to everything a TurtleBot3 actually navigates
-    # around. Override the scan geometry to the LDS.
+    # Example_Rotary_2D is a 200 m survey lidar out of the box, and a 1.0 m near
+    # range would blind the robot to everything a TurtleBot3 navigates around,
+    # so the ranges must be overridden. The *rates* deliberately are not.
+    #
+    # Forcing scanRateBaseHz to the LDS's 5 Hz (with patternFiringRateHz to
+    # match, for 360 samples/rev) does produce the right advertised geometry,
+    # but the scan pattern baked into the config still assumes its own 30 Hz /
+    # 32000 Hz. The plugin then warns "Multi-tick is enabled but motion BVH is
+    # not active. This is not supported." and /scan publishes erratically —
+    # a burst, then nothing — instead of steadily. Leaving the rates alone and
+    # letting tick_rate default to the asset's own value keeps the sensor
+    # self-consistent.
+    #
+    # Cost: ~0.34 deg/sample instead of the LDS's 1.0, i.e. a denser scan than
+    # the real robot. Harmless for Nav2, but it is a real sim2real gap — closing
+    # it means authoring an LDS scan-pattern config rather than re-rating this
+    # one. Tracked in docs/status.md.
     lidar = Lidar.create(
         path=LIDAR_PRIM,
         config='Example_Rotary_2D',
-        # Must equal scanRateBaseHz, or the sensor ticks out of step with its
-        # own scan and returns partial sweeps.
-        tick_rate=SCAN_HZ,
         translations=[list(SCAN_OFFSET)],
         attributes={
             'omni:sensor:Core:nearRangeM': SCAN_RANGE_MIN,
             'omni:sensor:Core:farRangeM': SCAN_RANGE_MAX,
-            'omni:sensor:Core:scanRateBaseHz': SCAN_HZ,
-            'omni:sensor:Core:patternFiringRateHz': int(SCAN_SAMPLES * SCAN_HZ),
         },
     )
 

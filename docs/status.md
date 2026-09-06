@@ -18,12 +18,33 @@
   simulator the way `gazebo.launch.py` starts gzserver/gzclient. Verified live:
   `/clock` 81 Hz, `/odom` 76 Hz, `/tf` 68 Hz, `/joint_states` 60 Hz, all read
   from `tb3_ros` across the container boundary, with `/cmd_vel` subscribed.
-- **`/scan` is the one gap.** The topic is advertised and the scan geometry is
-  right (1.000 deg/sample over 360 deg, 0.12-3.5 m, matching
-  `turtlebot3_gazebo`'s `hls_lfcd_lds` exactly), but no messages are delivered.
-  No errors; the RTX plugin logs `Multi-tick is enabled but motion BVH is not
-  active. This is not supported.` Under investigation — everything else in the
-  interface contract is live.
+- `/cmd_vel` drives the robot for real, not just in principle: commanding
+  `linear.x=0.15` moved `/odom` by 0.276 m, which is what 0.15 m/s gives over
+  the elapsed sim time at the observed ~0.6 real-time factor. That exercises the
+  whole chain — SubscribeTwist -> BreakVector3 -> DifferentialController ->
+  ArticulationController -> physics -> IsaacComputeOdometry -> `/odom`.
+- **`/scan` publishes but the sensor model is wrong, and it must be replaced
+  before Nav2.** Messages are well-formed (frame `base_scan`, `angle_min/max`
+  +/-pi, `range_min/max` 0.12/3.5, sim-time stamps) and arrive steadily. Two
+  problems, both from using the stock `Example_Rotary_2D` config:
+  1. **It points 2 degrees down.** Its single emitter has
+     `elevationDeg = [-2.0]`, so it scans the floor rather than the world. On a
+     completely empty ground plane it still reports 652 of 3600 rays as hits at
+     2.0-3.5 m — a partial arc where the tilted beam meets the ground, spread
+     out rather than a clean circle because the robot rests slightly pitched.
+     Nav2 would happily fill its costmap with that phantom ring.
+  2. **No-return is `-1.0`, not `inf`.** 2948 of 3600 rays come back as `-1.0`,
+     which is not a valid LaserScan range. Gazebo publishes `inf`, so the two
+     backends disagree on the one field Nav2's obstacle layer filters on.
+  Resolution is to author a real LDS scan-pattern config (0 degree elevation,
+  360 samples/rev at 5 Hz) instead of re-rating a survey lidar. Note that
+  overriding `scanRateBaseHz`/`patternFiringRateHz` on the stock config is *not*
+  a workaround — it advertises the right geometry but makes publishing erratic
+  and trips `Multi-tick is enabled but motion BVH is not active`.
+- **RTX lidar needs a real render path.** With `--headless` the writer attaches
+  cleanly and `/scan` is advertised, but not one message is ever produced. Every
+  other topic is unaffected, so a headless smoke test will tell you the bridge
+  is fine while `/scan` is silently dead.
 - `isaac/scripts/import_tb3.py` imports the TB3 URDF and assembles
   `isaac/scenes/tb3_world.usd`. Three steps, all verified working:
   `docker exec <tb3_ros> ... xacro ... > isaac/scenes/turtlebot3_burger.urdf`,

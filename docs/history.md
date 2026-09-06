@@ -130,3 +130,77 @@ green on exactly the bug it exists to catch.
 range (`3.4028235e38` min, `-3.4028235e38` max) for geometry it cannot measure.
 Seeing that in `extentsHint` is the fastest way to spot a mesh-less asset without
 opening the viewport.
+
+## 2026-09-06 — Consolidated Isaac Sim launcher; cross-container DDS fixed
+
+**Change:** `isaac/scripts/build_scene.py` is gone, replaced by
+`isaac/scripts/tb3_sim.py`. The old script built an OmniGraph into a stage and
+told you to press Play by hand. The new one *is* the simulator launcher —
+`SimulationApp` boots Kit, it opens the stage, builds the graph, attaches the
+lidar and calls `app_utils.play()` itself — which is what the Isaac Sim
+standalone examples (`carter_stereo.py`, `rtx_lidar.py`) actually do. It is now
+the compose default command, so `docker compose run --rm isaacsim` starts the
+simulator the way `gazebo.launch.py` starts gzserver/gzclient.
+`backend:=isaacsim` remains attach-only and unchanged.
+
+Three graph bugs were found by diffing the old file against Isaac Sim's own
+reference graph in `isaacsim.ros2.nodes/python/tests/test_differential_base.py`
+(`add_differential_drive`), which is the closest thing in the tree to our
+contract:
+
+1. `OnPlaybackTick` is `omni.graph.action.OnPlaybackTick`, not
+   `isaacsim.core.nodes.OnPlaybackTick`.
+2. `ROS2SubscribeTwist` outputs `vectord[3]`; `DifferentialController` takes
+   scalar `double`. They cannot be connected directly — two
+   `omni.graph.nodes.BreakVector3` nodes are required (`x` for linear, `z` for
+   angular).
+3. Target prims must be `usdrt.Sdf.Path(...)`, not plain strings, and they
+   should point at `base_footprint` (where the importer put
+   `PhysicsArticulationRootAPI`) rather than the reference prim above it.
+
+**Problem:** with all that correct, `ros2 topic list` from `tb3_ros` showed every
+Isaac Sim topic, `ros2 topic info --verbose` reported a healthy RELIABLE
+publisher with a real GID — and `ros2 topic echo` hung forever. Zero messages.
+
+**Root cause:** the two containers run as different uids. isaacsim is uid 1234
+(NVIDIA's Dockerfile ends `USER isaac-sim`), tb3_ros is root. Fast-DDS creates
+its `/dev/shm` segments with mode **0700**, so neither participant can open the
+other's. Discovery rides UDP multicast and works perfectly; the data path
+negotiates shared memory and silently delivers nothing. `ipc: host` was set
+correctly the entire time and `/dev/shm` genuinely was shared — which is exactly
+why this survived earlier debugging, including the unresolved
+`RobotDefinitionReader` note from the previous session.
+
+**Fix:** `docker/fastdds_udp_only.xml`, wired into both services via
+`FASTRTPS_DEFAULT_PROFILES_FILE`. Confirmed by pointing that variable at the XML
+for a single failing `ros2 topic echo` — data appeared instantly. Measured
+after: `/clock` 81 Hz, `/odom` 76 Hz, `/tf` 68 Hz, `/joint_states` 60 Hz
+headless. `/cmd_vel` verified by driving the robot 0.276 m.
+
+**Concept — "connected" is not "delivering".** Every diagnostic short of moving
+an actual byte was green: topic present, publisher present, QoS compatible,
+matching domain, shared `/dev/shm`. DDS splits discovery from data transport,
+so a transport that cannot open its buffers looks identical to an idle
+publisher. `ros2 topic echo` is the only one of those checks that proves
+anything; treat the rest as necessary, never sufficient.
+
+**Concept — a dropped Python reference silently kills a sensor.** Writing
+`LidarSensor(lidar, annotators=[]).attach_writer(...)` attaches the writer and
+then lets the object be garbage collected, taking the render product with it.
+`/scan` was never advertised and nothing logged a complaint. Binding it to a
+name that outlives the run loop fixed it.
+
+**Concept — RTX sensors need a real render path.** Under `--headless` the lidar
+writer attaches and `/scan` is advertised but not one message is produced, while
+every other topic behaves normally. A headless smoke test therefore reports a
+healthy bridge and a dead lidar as the same thing.
+
+**Open — the lidar is the wrong sensor.** `Example_Rotary_2D`'s single emitter
+has `elevationDeg = [-2.0]`, i.e. it points 2 degrees *down* and scans the
+floor. On an empty ground plane it still returns 652 of 3600 rays as hits at
+2.0-3.5 m (a partial arc, spread rather than a clean circle because the robot
+rests slightly pitched) — a phantom ring Nav2 would treat as obstacles. It also
+reports no-return as `-1.0` rather than Gazebo's `inf`. Re-rating the config to
+5 Hz / 360 samples advertises the right geometry but makes publishing erratic
+and trips `Multi-tick is enabled but motion BVH is not active`, so the real fix
+is authoring an LDS scan pattern rather than bending this one.
