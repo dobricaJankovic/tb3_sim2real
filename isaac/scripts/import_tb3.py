@@ -10,6 +10,21 @@ the shared isaac/scenes/ bind mount:
        $(ros2 pkg prefix --share turtlebot3_description)/urdf/turtlebot3_${TURTLEBOT3_MODEL}.urdf \
        namespace:=' > isaac/scenes/turtlebot3_${TURTLEBOT3_MODEL}.urdf
 
+The expanded URDF still points at its meshes by `package://` URL, and the
+isaacsim container has no ROS and therefore no turtlebot3_description on disk
+to resolve them against. Copy the package's share directory onto the same bind
+mount (gitignored — 40 MB of STL):
+
+    docker cp <tb3_ros container>:/opt/ros/humble/share/turtlebot3_description \
+      isaac/scenes/turtlebot3_description
+
+Skipping that step does NOT fail the import. The converter resolves each
+unmatched `package://turtlebot3_description/meshes/...` to a bare relative
+path, finds nothing, and emits the link as an *empty* Xform — correct
+transform, correct material binding, no geometry. You get a stage that loads
+clean and renders nothing at all, with the only visible clue being FLT_MAX
+sentinels in the asset's `extentsHint`. See docs/troubleshooting.md.
+
 Then, inside the isaacsim container:
 
     /isaac-sim/python.sh /scripts/import_tb3.py --model burger
@@ -48,6 +63,14 @@ def import_robot(model: str) -> str:
     config = URDFImporterConfig(
         urdf_path=f'/scenes/turtlebot3_{model}.urdf',
         usd_path=f'/scenes/turtlebot3_{model}.usd',
+        # Maps `package://turtlebot3_description/<rel>` -> `<path>/<rel>`, so
+        # this must be the package's share directory itself, not its parent.
+        # Without it every visual mesh imports as an empty Xform (see module
+        # docstring); the collision primitives are inline URDF <box>/<cylinder>
+        # and import either way, which is what makes the failure so quiet.
+        ros_package_paths=[
+            {'name': 'turtlebot3_description', 'path': '/scenes/turtlebot3_description'},
+        ],
         merge_fixed_joints=True,
         fix_base=False,                # mobile robot, not bolted to the world
         robot_type='Wheeled',

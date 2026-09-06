@@ -72,14 +72,33 @@
   `rmw_cyclonedds_cpp` with an explicit static-peer `cyclonedds.xml` pointing
   at both machines' IPs. Needs doing on both the dev host and the robot —
   picking it up later.
-- **UNRESOLVED — Isaac Sim GUI shows a blank viewport.** `isaac/scenes/tb3_world.usd`
-  and `turtlebot3_burger.usd` (see `isaac/scripts/import_tb3.py`) both open fine
-  via File -> Open — no error, the stage loads — but nothing renders in the
-  viewport. The main Kit process (`isaacsim` service, `runapp.sh`) is confirmed
-  running and the host X server is confirmed reachable (`DISPLAY=:1`,
-  `xdpyinfo` succeeds), so it's not a dead process or unreachable X11. A scan of
-  recent container logs turned up nothing RTX/GPU-specific, only unrelated
-  asset-browser `PermissionError`s (`/home/ubuntu/workspace_cache.json`,
-  populating `/home/ubuntu`) — those are the file browser panel, not the
-  viewport renderer, and don't obviously explain it. Not investigated further
-  yet; picking it up later.
+- **RESOLVED — Isaac Sim GUI shows a blank viewport.** `tb3_world.usd` and
+  `turtlebot3_burger.usd` opened without error but rendered nothing. Two
+  independent bugs were stacked here, which is why it looked so strange:
+  the stage genuinely had no renderable geometry (see the `package://` entry
+  below), *and* the GUI window was never actually opening (see the Xauthority
+  path entry above — the "confirmed running" Kit process was running windowless).
+  Both are fixed; the stage now bounds to 138 x 178 x 191 mm.
+- **Imported robot renders nothing, stage loads clean.** The URDF's meshes are
+  `package://turtlebot3_description/meshes/...`, but the isaacsim container has
+  no ROS and so no such package on disk. `urdf_usd_converter` resolves an
+  unmatched `package://` URL to a *bare relative path* against the URDF's own
+  directory, finds nothing, and still emits the link — as an empty `Xform` with
+  the correct transform and material binding but no geometry. Nothing errors.
+  What makes it especially quiet is that the inline `<collision>` primitives
+  (`<box>`, `<cylinder>`) have no external file and import fine, so the prim
+  tree looks populated — but they carry `purpose = "guide"` and are not drawn.
+  Tells: no `geometries.usd` in the asset package, and `extentsHint` full of
+  `3.4028235e38` (FLT_MAX) sentinels, which is USD's empty-bounds marker.
+  Fix: copy the package share dir onto the shared mount and point the importer
+  at it with `ros_package_paths=[{'name': ..., 'path': ...}]`, where `path` is
+  the package directory *itself* — resolution is `path / relative_path`, so
+  naming the parent silently fails the same way. Verify with
+  `isaac/scripts/verify_asset.py`, which bounds the robot subtree specifically;
+  checking the whole stage is not enough, because a ground plane alone clears it.
+- **Files written by the isaacsim container can't be deleted from the host.**
+  It runs as uid 1234, so anything it writes into `isaac/scenes/` is owned by
+  1234 and `rm` fails with EACCES on the subdirectories. Remove them with a
+  throwaway root container:
+  `docker run --rm --user root --entrypoint bash -v $PWD/isaac/scenes:/scenes
+  isaac-sim-docker:latest -c 'rm -rf /scenes/<path>'`.

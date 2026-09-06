@@ -14,6 +14,12 @@ isaac/scenes/*.usda
 isaac/scenes/*.usdc
 !isaac/scenes/.gitkeep
 
+# turtlebot3_description copied out of the tb3_ros image so the isaacsim
+# container can resolve the URDF's package:// mesh URLs. 40 MB of STL that
+# already ships with ros-humble-turtlebot3-description — regenerate with the
+# docker cp in isaac/scripts/import_tb3.py's docstring rather than committing.
+isaac/scenes/turtlebot3_description/
+
 # local env overrides
 .env
 docker-compose.override.yml
