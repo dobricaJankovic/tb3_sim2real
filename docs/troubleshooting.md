@@ -117,3 +117,23 @@
   throwaway root container:
   `docker run --rm --user root --entrypoint bash -v $PWD/isaac/scenes:/scenes
   isaac-sim-docker:latest -c 'rm -rf /scenes/<path>'`.
+- **Isaac Sim aborts on startup with a carb shared-memory assertion.** The
+  message is
+  `RStringInternals.inl:667 Assertion (false) failed: Failed to create shared
+  memory named carb-RStringInternals-62`, followed by `terminate called without
+  an active exception` and a core dump, before Kit produces any other output.
+  carb names that POSIX segment after its own PID, and under `python.sh` the
+  PID is deterministically 62 nearly every run. The isaacsim service used to
+  set `ipc: host`, which put that name in the *host's* `/dev/shm` — sticky
+  (`drwxrwxrwt`), shared with every other container, and with anything that
+  ever ran Kit as root. This service runs as uid 1234 (`USER isaac-sim`), so a
+  root-owned leftover at that exact name can be neither reused nor unlinked.
+  Because the name is PID-derived and the PID repeats, one stale file poisons
+  that slot *permanently*: every later run fails identically, which is what
+  makes it look like a broken image rather than stale state.
+  Fixed structurally by dropping `ipc: host` (see `docker-compose.yml`) so the
+  container gets a private `/dev/shm`. Nothing needed the shared one — DDS is
+  UDP-only per `docker/fastdds_udp_only.xml` and MIT-SHM is off.
+  If you meet this on an older checkout, clear the stale segments with
+  `sudo rm -f /dev/shm/carb-RStringInternals-* /dev/shm/sem.carb-RStringInternals-*`
+  while no Kit process is running.

@@ -204,3 +204,63 @@ reports no-return as `-1.0` rather than Gazebo's `inf`. Re-rating the config to
 5 Hz / 360 samples advertises the right geometry but makes publishing erratic
 and trips `Multi-tick is enabled but motion BVH is not active`, so the real fix
 is authoring an LDS scan pattern rather than bending this one.
+
+## 2026-09-06 — `ipc: host` was load-bearing for nothing, and cost us startup
+
+**Problem — Isaac Sim aborted before Kit started.** `docker compose run --rm
+isaacsim` died on
+`Failed to create shared memory named carb-RStringInternals-62`. carb names that
+segment after its own PID, which under `python.sh` is deterministically 62. With
+`ipc: host` the name lived in the host's `/dev/shm`, which is sticky and shared;
+a root-owned leftover sat at exactly that name, and this container is uid 1234,
+so it could neither reuse nor unlink it. The PID repeats, so a single stale file
+poisons that slot forever — the failure presents as a broken image, not as
+stale state, which is why it looked unrecoverable.
+
+**Fix — drop `ipc: host` from the isaacsim service.** A private IPC namespace
+makes the collision structurally impossible rather than merely cleaned up.
+Verified: the sim reached `PLAYING`, and from `tb3_ros` across the container
+boundary `/clock` 30 Hz, `/tf` 30 Hz, `/joint_states` 30 Hz, `/odom` 28 Hz. The
+run left *zero* new segments in the host `/dev/shm`, which is the actual proof —
+the container's segments now live and die in its own namespace.
+
+**Concept — a comment can outlive the design it describes.** `docker-compose.yml`
+insisted both services needed a shared `/dev/shm` "or discovery works and data
+silently does not." That was true when written, but `docker/fastdds_udp_only.xml`
+was added later and disables the SHM transport outright
+(`useBuiltinTransports=false`, UDPv4 only) precisely because the uid split made
+SHM unusable. From that moment the shared `/dev/shm` carried no data and only
+supplied collisions. Two correct facts, recorded a week apart, silently
+contradicting each other. Worth re-reading the *reasons* in config when a fix
+lands, not just the settings.
+
+**Concept — no `shm_size` override is needed.** The instinct on removing
+`ipc: host` is to compensate with a large `shm_size`, since the private default
+is 64 MB. NVIDIA's own `tools/docker/run_docker.sh` passes `--network=host`
+with no `--ipc` and no `--shm-size`, so Kit is known to run on the default, and
+it did.
+
+**Concept — Isaac Sim bundles *both* Humble and Jazzy, so `ROS_DISTRO` selects,
+it does not rescue.** `docker-compose.yml` justified `ROS_DISTRO=jazzy` with
+"the bundled distro is Jazzy, not Humble." That is wrong:
+`/isaac-sim/exts/isaacsim.ros2.core/` contains `humble/` *and* `jazzy/`, and
+with `LD_LIBRARY_PATH` pointed at either one, every dependency of
+`librmw_fastrtps_cpp.so` resolves — Humble would probably work too. The
+extension defaults to `ros_distro = "system_default"`, i.e. it reads
+`ROS_DISTRO` and picks a directory; unset, it resolves nothing and the bridge
+dies. Jazzy is the right pick because the image is Ubuntu 24.04 (noble) and
+Jazzy is noble's distro, but it is a choice, not a constraint. Confirmed in the
+boot log: `Attempting to load internal rclpy for ROS Distro: jazzy`.
+
+**Open — cross-distro means no type-hash safety net.** Jazzy publishes message
+type hashes in discovery; Humble does not understand them. The standard message
+types we use are unchanged between the two, so the wire bytes match — but if a
+definition ever did diverge, the result would be silent garbage rather than a
+mismatch error, in keeping with everything else in this stack.
+
+**Open — observed topic rates are well below the previously recorded ones.**
+`docs/status.md` records `/clock` 81 Hz, `/odom` 76 Hz, `/tf` 68 Hz,
+`/joint_states` 60 Hz; this run measured roughly half that (30/28/30/30), and
+`/scan` came in at 0.66 Hz against a configured 10 Hz. The machine was under
+load from other containers, so this is not necessarily a regression and was not
+investigated. Re-measure on an idle host before drawing any conclusion.

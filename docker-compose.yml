@@ -5,8 +5,15 @@
 #   tb3_ros   -> Ubuntu 22.04 (jammy), system ROS 2 Humble, python 3.10.
 #                Nav2, RViz, Gazebo Classic, real-robot drivers, our bringup package.
 #
-# They only ever talk over DDS. Both need the SAME ROS_DOMAIN_ID and a shared
-# /dev/shm (ipc: host), or discovery works and data silently does not.
+# They only ever talk over DDS, and they need the SAME ROS_DOMAIN_ID.
+#
+# They do NOT need a shared /dev/shm. That was the original design and this
+# comment used to say `ipc: host` was required "or discovery works and data
+# silently does not" — but docker/fastdds_udp_only.xml, added later, disables
+# Fast-DDS's shared-memory transport outright (useBuiltinTransports=false,
+# UDPv4 only) because the two containers run as different uids and Fast-DDS
+# creates its segments 0700. With SHM off on both sides, sharing /dev/shm
+# carried no data and only created collisions — see the isaacsim service.
 #
 # BOTH services are network_mode: host, and that has to stay symmetric. The
 # official ROS image docs warn that host networking "removes the networking
@@ -36,7 +43,30 @@ services:
     entrypoint: /isaac-sim/python.sh
     command: /scripts/tb3_sim.py
     network_mode: host
-    ipc: host
+    # Deliberately NO `ipc: host` — this container gets its own /dev/shm.
+    #
+    # carb (Kit's core) creates a POSIX shared-memory segment named after its
+    # own PID: /dev/shm/carb-RStringInternals-<pid>. Under python.sh that PID is
+    # deterministically 62 nearly every run. With `ipc: host` that lands in the
+    # HOST's /dev/shm, which is sticky (drwxrwxrwt) and shared with every other
+    # container and with anything that ever ran Kit as root. This service runs
+    # as uid 1234 (NVIDIA's image ends `USER isaac-sim`), so a root-owned
+    # leftover at that exact name can be neither reused nor unlinked, and Kit
+    # aborts before it starts:
+    #
+    #   RStringInternals.inl:667 Assertion (false) failed:
+    #     Failed to create shared memory named carb-RStringInternals-62
+    #   terminate called without an active exception
+    #
+    # Because the name is PID-derived and the PID repeats, one stale root-owned
+    # file poisons that slot permanently — every subsequent run fails the same
+    # way. A private IPC namespace makes the collision structurally impossible.
+    #
+    # Nothing needed the shared /dev/shm: DDS is UDP-only (see the profiles file
+    # below) and MIT-SHM is off (QT_X11_NO_MITSHM=1). No shm_size override
+    # either — NVIDIA's own tools/docker/run_docker.sh passes --network=host
+    # with no --ipc and no --shm-size, so Kit is known to run on the 64 MB
+    # default.
     environment:
       - ACCEPT_EULA=Y
       - PRIVACY_CONSENT=Y
@@ -61,9 +91,21 @@ services:
       # isaacsim.ros2.core fall back cleanly — it logs "ROS2 Bridge startup
       # failed" (librmw_implementation.so -> missing libament_index_cpp.so)
       # and the bridge silently never talks DDS. Its own error message names
-      # this exact fix. Also: the bundled distro is Jazzy, not Humble — that's
-      # fine, FastDDS is wire-compatible across ROS 2 versions and tb3_ros
-      # already defaults to rmw_fastrtps_cpp.
+      # this exact fix. The variable SELECTS a bundle, it does not rescue one:
+      # the extension defaults to `ros_distro = "system_default"`, i.e. it reads
+      # ROS_DISTRO and picks a directory under exts/isaacsim.ros2.core/, and
+      # unset it resolves nothing.
+      #
+      # NOT "the bundled distro is Jazzy, not Humble" (what this said before) —
+      # the image ships BOTH humble/ and jazzy/, and with LD_LIBRARY_PATH aimed
+      # at either, every dependency of librmw_fastrtps_cpp.so resolves. Humble
+      # would likely work. Jazzy is chosen because this image is Ubuntu 24.04
+      # (noble) and Jazzy is noble's distro, so it matches the container's own
+      # libraries. Mixing with tb3_ros's Humble is fine: FastDDS is wire
+      # compatible, the message types we use are unchanged between the two, and
+      # tb3_ros already defaults to rmw_fastrtps_cpp. The cost is that Jazzy's
+      # discovery type hashes mean nothing to Humble, so a genuinely divergent
+      # message definition would surface as garbage, not as an error.
       - ROS_DISTRO=jazzy
       - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
       - LD_LIBRARY_PATH=/isaac-sim/exts/isaacsim.ros2.core/jazzy/lib
