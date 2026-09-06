@@ -16,7 +16,7 @@ same Humble message definitions.
 **A single container is blocked by glibc, not by Python.** Tested on 2026-09-06;
 see `docker/isaacsim-ros2/`, which builds exactly that image. Kit runs on jammy —
 the `kit` binary and `libcarb.so` need at most `GLIBC_2.34` and jammy has 2.35 —
-and so do 1085 of Isaac Sim's 1094 extension libraries. Nine need `GLIBC_2.38`,
+and so do 1095 of Isaac Sim's 1104 extension libraries. Nine need `GLIBC_2.38`,
 which only noble provides, and three of those nine are the bridge:
 `libisaacsim.ros2.core.humble.so`, `libisaacsim.ros2.core.jazzy.so` and
 `libisaacsim.ros2.nodes.plugin.so`. Both bundled distros fail the same way, so

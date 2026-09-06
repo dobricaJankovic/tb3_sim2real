@@ -232,7 +232,7 @@ installation *in the same container*.
 
 **Open — the 22.04/Humble image is blocked upstream by glibc.** Kit itself runs
 fine on Jammy (the `kit` binary and `libcarb.so` need at most `GLIBC_2.34`;
-Jammy has 2.35), and 1085 of 1094 Isaac Sim extension libraries are within that
+Jammy has 2.35), and 1095 of 1104 Isaac Sim extension libraries are within that
 ceiling. Nine require `GLIBC_2.38`, which only Noble provides — and three of
 them are the bridge: `libisaacsim.ros2.core.humble.so`,
 `libisaacsim.ros2.core.jazzy.so`, `libisaacsim.ros2.nodes.plugin.so`. Both
