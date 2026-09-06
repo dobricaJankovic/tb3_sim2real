@@ -11,7 +11,7 @@ is jammy). The pattern we want is carter_navigation.launch.py, which assumes the
 simulator is already running and playing somewhere on the DDS domain.
 
 Isaac Sim supplies: /clock, /scan, /odom, /joint_states, tf odom->base_footprint,
-/cmd_vel sink — all from OmniGraph nodes built by isaac/scripts/build_scene.py.
+/cmd_vel sink — all from OmniGraph nodes built by isaac/scripts/tb3_sim.py.
 Those nodes only produce data while the sim is PLAYING.
 """
 

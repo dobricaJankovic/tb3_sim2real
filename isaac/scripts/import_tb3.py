@@ -32,13 +32,11 @@ Then, inside the isaacsim container:
 Produces:
     /scenes/turtlebot3_<model>.usd/...  the robot as a standalone, reusable asset
     /scenes/tb3_world.usd               ground plane + light + robot reference,
-                                         the stage build_scene.py expects at
-                                         --stage
+                                         the stage tb3_sim.py loads by default
 
-Verified once, live, against isaacsim.asset.importer.urdf 1.4.3 /
-isaacsim.core.utils.stage 6.0 on the burger model — see the two mismatches
-against build_scene.py's assumptions noted below, both already reflected
-there.
+Verified live against isaacsim.asset.importer.urdf 1.4.3 on the burger model:
+4 visual meshes bounding to 138 x 178 x 191 mm, matching the physical robot.
+Re-check with verify_asset.py after any change here.
 """
 
 import argparse
@@ -75,7 +73,7 @@ def import_robot(model: str) -> str:
         fix_base=False,                # mobile robot, not bolted to the world
         robot_type='Wheeled',
         joint_drive_type='force',
-        joint_target_type='velocity',  # matches build_scene.py's ArticulationController usage
+        joint_target_type='velocity',  # matches tb3_sim.py's ArticulationController usage
         # TODO: unverified gain — importer logs "Stiffness and damping not
         # available ... actuator will be created without gain parameters"
         # without this. Value below is a plausible starting point, not tuned.
@@ -101,7 +99,7 @@ def build_world(robot_usda: str) -> None:
     light = UsdLux.DistantLight.Define(stage, '/World/DistantLight')
     light.CreateIntensityAttr(1000)
 
-    # ROBOT_PRIM in build_scene.py. The imported asset's own root prim is
+    # ROBOT_PRIM in tb3_sim.py. The imported asset's own root prim is
     # named after the URDF's <robot name="...">  (turtlebot3_<model>), not
     # this — referencing pins it at the path the rest of the pipeline expects.
     add_reference_to_stage(usd_path=robot_usda, prim_path='/World/turtlebot3')

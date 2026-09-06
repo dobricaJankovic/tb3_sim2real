@@ -5,7 +5,22 @@
   error. Set it explicitly for both services (compose does).
 - **Separate `/dev/shm`.** Discovery succeeds over UDP, then Fast-DDS negotiates
   shared memory for the data path and nothing arrives. `ipc: host` on both.
-  If it still misbehaves, force UDP-only via `FASTRTPS_DEFAULT_PROFILES_FILE`.
+- **Fast-DDS shared memory across containers running as different uids.**
+  This bit us for real, and `ipc: host` was set correctly the whole time —
+  `/dev/shm` genuinely was shared. The problem is that isaacsim runs as uid 1234
+  (NVIDIA's image ends with `USER isaac-sim`) while tb3_ros runs as root, and
+  Fast-DDS creates its `/dev/shm` segments with mode **0700**, so neither
+  participant can open the other's. The symptom is maximally deceptive:
+  discovery rides UDP multicast, so `ros2 topic list` from `tb3_ros` shows
+  every Isaac Sim topic and `ros2 topic info --verbose` reports a healthy
+  `RELIABLE` publisher with a real GID — but `ros2 topic echo` hangs forever
+  and `ros2 topic hz` reports nothing. Everything looks connected; zero bytes
+  move. Fixed by forcing UDP-only on both services via
+  `docker/fastdds_udp_only.xml` + `FASTRTPS_DEFAULT_PROFILES_FILE` (compose
+  sets both). Quick confirmation that you are looking at this and not something
+  else: re-run the failing `ros2 topic echo` with
+  `FASTRTPS_DEFAULT_PROFILES_FILE` pointed at that XML — if data appears
+  instantly, it was SHM.
 - **Isaac Sim publishes nothing until you press Play.** OmniGraph nodes are
   inert when stopped, which looks exactly like a broken DDS setup.
   `wait_for_sim` exists to make this legible in the log.

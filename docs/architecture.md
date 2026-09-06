@@ -23,7 +23,7 @@ Full write-up: <https://claude.ai/code/artifact/f7809bfe-4918-4977-938c-e008f28c
 docker/ros/            the tb3_ros image (Humble + Nav2 + Gazebo + TB3)
 docker-compose.yml     both services, network_mode+ipc host, shared ROS_DOMAIN_ID
 isaac/scenes/          TB3 USD stages (gitignored — decide on LFS later)
-isaac/scripts/         build_scene.py — the OmniGraph ROS 2 graph, scripted
+isaac/scripts/         tb3_sim.py — the simulator launcher: stage + graph + play()
 scripts/               one-off host/container helpers
 tb3_bringup/
   launch/bringup.launch.py     ← single entry point, dispatches on backend
@@ -61,8 +61,9 @@ QoS mismatches, which is where nearly all the failures are.
    `ROS_DOMAIN_ID` or `/dev/shm`, nothing exotic.
 2. **Get a TurtleBot3 into Isaac Sim.** No TB3 asset ships with Isaac Sim —
    import the URDF, fix up the articulation and drive joints, save to
-   `isaac/scenes/`. This is real work; budget for it.
-3. **Build the OmniGraph graph** via `isaac/scripts/build_scene.py`, and pin the
+   `isaac/scenes/`. This is real work; budget for it. Gate it on
+   `isaac/scripts/verify_asset.py`: a mesh-less import still loads without error.
+3. **Build the OmniGraph graph** via `isaac/scripts/tb3_sim.py`, and pin the
    frame names. Verify with `ros2 topic hz` and `ros2 run tf2_tools view_frames`.
 4. **Write the backends, Gazebo first** — it's the one you already know works.
    Once `backend:=gazebo` reproduces your current two-terminal workflow, the
