@@ -15,6 +15,8 @@
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>rclpy</exec_depend>
   <exec_depend>ament_index_python</exec_depend>
+  <!-- tb3_bringup/worlds.py parses the world registry's world.yaml manifests -->
+  <exec_depend>python3-yaml</exec_depend>
 
   <!-- shared across all backends -->
   <exec_depend>robot_state_publisher</exec_depend>

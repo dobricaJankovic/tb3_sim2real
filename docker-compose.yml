@@ -68,6 +68,12 @@ services:
     # with no --ipc and no --shm-size, so Kit is known to run on the 64 MB
     # default.
     environment:
+      # Which environment tb3_sim.py loads, by registry name (worlds/<name>/).
+      # This is the isaacsim counterpart of `bringup.launch.py world:=` — Isaac
+      # Sim runs in its own container, so the world is chosen here rather than
+      # by the ROS-side launch, which only attaches.
+      #   WORLD=my_office docker compose run --rm isaacsim
+      - WORLD=${WORLD:-turtlebot3_world}
       - ACCEPT_EULA=Y
       - PRIVACY_CONSENT=Y
       - PRIVACY_USERID=${PRIVACY_EMAIL:-user@example.com}
@@ -119,6 +125,10 @@ services:
       - ${TB3_XAUTH:-/tmp/tb3_sim2real.docker.xauth}:/tmp/.docker.xauth:ro
       - ./isaac/scenes:/scenes   # rw: the URDF importer writes the asset and world stage here
       - ./isaac/scripts:/scripts:ro
+      # The world registry, mounted at the SAME path in both services so
+      # tb3_bringup.worlds and tb3_sim.py resolve identically. rw because
+      # build_world_usd.py writes <name>.usd back beside the manifest.
+      - ./worlds:/worlds
     deploy:
       resources:
         reservations:
@@ -152,7 +162,13 @@ services:
       # GAZEBO_MODEL_DATABASE_URI emptied below there's no fallback fetch left
       # either — the robot spawns into a world with no ground plane and falls
       # through forever.
-      - GAZEBO_MODEL_PATH=/opt/ros/humble/share/turtlebot3_gazebo/models:/usr/share/gazebo-11/models
+      #
+      # /worlds is prepended so the registry's generated worlds can reference
+      # their own shared meshes as model://<name>/meshes/..., which is what
+      # keeps the generated .world free of absolute container paths. Gazebo
+      # picks a directory up as a model only if it contains model.config, which
+      # build_world.py generates alongside the .world.
+      - GAZEBO_MODEL_PATH=/worlds:/opt/ros/humble/share/turtlebot3_gazebo/models:/usr/share/gazebo-11/models
       # gzserver's ModelDatabase does a synchronous fetch from
       # models.gazebosim.org on startup to refresh its local model cache
       # metadata, independent of GAZEBO_MODEL_PATH above. In this network it
@@ -177,6 +193,9 @@ services:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - ${TB3_XAUTH:-/tmp/tb3_sim2real.docker.xauth}:/root/.Xauthority:ro
       - ./tb3_bringup:/ws/src/tb3_bringup   # edit on host, colcon build inside
+      # Same registry the isaacsim service mounts, same path. Read-only here:
+      # only the Isaac side generates into it.
+      - ./worlds:/worlds:ro
       # ROS writes its logs to ~/.ros, which is /root/.ros for this image. We
       # mostly `run --rm`, so without this every log is destroyed on exit — and
       # the failures here are usually the silent kind you can only diagnose

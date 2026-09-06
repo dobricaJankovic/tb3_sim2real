@@ -38,11 +38,28 @@ def setup(context, *args, **kwargs):
             launch_arguments={'use_sim_time': use_sim_time, **extra}.items(),
         )
 
+    # Only the simulated backends take a world, and only Gazebo can act on it
+    # from here. For isaacsim the environment is chosen on the simulator side
+    # (tb3_sim.py --world, or WORLD= in docker-compose.yml) because Isaac Sim
+    # runs in its own container and this launch only attaches to it. Passing
+    # world:= with backend:=isaacsim would therefore be a lie, so it is refused.
+    backend_args = {}
+    world = LaunchConfiguration('world').perform(context)
+    if backend == 'gazebo':
+        # Empty means "don't override"; the backend declares its own default.
+        if world:
+            backend_args['world'] = world
+    elif world:
+        raise RuntimeError(
+            f"world:= is only meaningful for backend:=gazebo, not '{backend}'. "
+            f"For isaacsim, select the world where the simulator is launched: "
+            f"`WORLD={world} docker compose run --rm isaacsim`.")
+
     actions = [
         # Same URDF drives the kinematic tree in all three worlds. Each backend
         # only has to supply odom->base_footprint plus sensor topics.
         inc('common/state_publisher.launch.py'),
-        inc(f'backends/{backend}.launch.py'),
+        inc(f'backends/{backend}.launch.py', **backend_args),
     ]
 
     if LaunchConfiguration('nav').perform(context) == 'true':
@@ -63,6 +80,10 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'backend',
             description='Which robot to bring up: real | gazebo | isaacsim'),
+        DeclareLaunchArgument(
+            'world', default_value='',
+            description='Environment from the registry (worlds/<name>/). '
+                        'backend:=gazebo only; empty means that backend default'),
         DeclareLaunchArgument(
             'nav', default_value='true',
             description='Also start the Nav2 stack'),

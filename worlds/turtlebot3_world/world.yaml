@@ -1,0 +1,94 @@
+# turtlebot3_world — the standard TurtleBot3 Nav2 arena.
+#
+# THIS FILE IS THE SOURCE OF TRUTH. The Gazebo .world and the Isaac Sim .usd are
+# both GENERATED from it, so the two simulators cannot drift apart:
+#
+#   scripts/build_world.py <name>                 -> <name>.world  (SDF, committed)
+#   isaac/scripts/build_world_usd.py --world <n>  -> <name>.usd    (gitignored)
+#
+# Edit this, then regenerate both. Never hand-edit a generated file.
+#
+# The geometry under meshes/ is shared byte-for-byte between the two backends —
+# that is the whole point of the layout. Only the wrappers differ.
+#
+# Derived mechanically from turtlebot3_gazebo's models/turtlebot3_world/model.sdf
+# (ros-humble-turtlebot3-gazebo) so the placements are upstream's, not retyped.
+
+name: turtlebot3_world
+description: >-
+  ROBOTIS' standard TurtleBot3 arena: a hexagonal wall enclosing nine cylindrical
+  obstacles on a 3x3 grid, with five decorative hexagons outside the wall.
+
+# Where the robot starts. Matches turtlebot3_world.launch.py's x_pose/y_pose, so
+# Gazebo and Isaac Sim runs are comparable from the same initial pose.
+spawn:
+  xyz: [-2.0, -0.5, 0.01]
+  yaw: 0.0
+
+# Every body here is STATIC (upstream sets <static>1</static>): collider plus
+# visual, no rigid-body dynamics. Generators must not attach a rigid body.
+#
+# Mesh collisions must stay EXACT (triangle mesh), never a convex hull: the wall
+# is a thin hexagonal shell whose convex hull is a solid prism, which would seal
+# the robot inside the arena at spawn.
+bodies:
+  - name: one_one
+    geometry: {type: cylinder, radius: 0.15, length: 0.5}
+    xyz: [-1.1, -1.1, 0.25]
+    rpy: [0, 0, 0]
+  - name: one_two
+    geometry: {type: cylinder, radius: 0.15, length: 0.5}
+    xyz: [-1.1, 0, 0.25]
+    rpy: [0, 0, 0]
+  - name: one_three
+    geometry: {type: cylinder, radius: 0.15, length: 0.5}
+    xyz: [-1.1, 1.1, 0.25]
+    rpy: [0, 0, 0]
+  - name: two_one
+    geometry: {type: cylinder, radius: 0.15, length: 0.5}
+    xyz: [0, -1.1, 0.25]
+    rpy: [0, 0, 0]
+  - name: two_two
+    geometry: {type: cylinder, radius: 0.15, length: 0.5}
+    xyz: [0, 0, 0.25]
+    rpy: [0, 0, 0]
+  - name: two_three
+    geometry: {type: cylinder, radius: 0.15, length: 0.5}
+    xyz: [0, 1.1, 0.25]
+    rpy: [0, 0, 0]
+  - name: three_one
+    geometry: {type: cylinder, radius: 0.15, length: 0.5}
+    xyz: [1.1, -1.1, 0.25]
+    rpy: [0, 0, 0]
+  - name: three_two
+    geometry: {type: cylinder, radius: 0.15, length: 0.5}
+    xyz: [1.1, 0, 0.25]
+    rpy: [0, 0, 0]
+  - name: three_three
+    geometry: {type: cylinder, radius: 0.15, length: 0.5}
+    xyz: [1.1, 1.1, 0.25]
+    rpy: [0, 0, 0]
+  - name: head
+    geometry: {type: mesh, uri: meshes/hexagon.dae, scale: [0.8, 0.8, 0.8]}
+    xyz: [3.5, 0, -0.5]
+    rpy: [0, 0, 0]
+  - name: left_hand
+    geometry: {type: mesh, uri: meshes/hexagon.dae, scale: [0.55, 0.55, 0.55]}
+    xyz: [1.8, 2.7, 0]
+    rpy: [0, 0, 0]
+  - name: right_hand
+    geometry: {type: mesh, uri: meshes/hexagon.dae, scale: [0.55, 0.55, 0.55]}
+    xyz: [1.8, -2.7, 0]
+    rpy: [0, 0, 0]
+  - name: left_foot
+    geometry: {type: mesh, uri: meshes/hexagon.dae, scale: [0.55, 0.55, 0.55]}
+    xyz: [-1.8, 2.7, 0]
+    rpy: [0, 0, 0]
+  - name: right_foot
+    geometry: {type: mesh, uri: meshes/hexagon.dae, scale: [0.55, 0.55, 0.55]}
+    xyz: [-1.8, -2.7, 0]
+    rpy: [0, 0, 0]
+  - name: body
+    geometry: {type: mesh, uri: meshes/wall.dae, scale: [0.25, 0.25, 0.25]}
+    xyz: [0, 0, -0.3]
+    rpy: [0, 0, -1.5708]

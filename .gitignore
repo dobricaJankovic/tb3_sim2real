@@ -20,6 +20,15 @@ isaac/scenes/*.usdc
 # docker cp in isaac/scripts/import_tb3.py's docstring rather than committing.
 isaac/scenes/turtlebot3_description/
 
+# Generated Isaac Sim stages for the world registry. The manifest, the shared
+# meshes and the generated .world ARE committed (text, reviewable, and the
+# Gazebo backend then needs no build step); the USD is a binary-ish build
+# product, so it is rebuilt with isaac/scripts/build_world_usd.py instead.
+worlds/*/*.usd
+worlds/*/*.usda
+worlds/*/*.usdc
+worlds/*/_converted/
+
 # local env overrides
 .env
 docker-compose.override.yml
