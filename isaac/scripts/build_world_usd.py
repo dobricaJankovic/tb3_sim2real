@@ -275,6 +275,47 @@ def verify(stage, manifest, name):
     would otherwise leave Isaac Sim and Gazebo silently disagreeing about the
     same world. See the module docstring.
     """
+    # Colliders first. These are cheap invariants of the manifest itself, and
+    # each one is a silent failure if violated: no collider means the robot
+    # drives through a wall the lidar can still see (the RTX lidar traces render
+    # geometry, physics uses colliders, and the two are independent); a convex
+    # approximation on the hollow wall seals the robot in; a rigid body on a
+    # static prop makes the arena fall over on play().
+    n_col = n_mesh = n_rigid = 0
+    approximations = set()
+    for prim in stage.Traverse():
+        if prim.HasAPI(UsdPhysics.RigidBodyAPI):
+            n_rigid += 1
+        if not prim.HasAPI(UsdPhysics.CollisionAPI):
+            continue
+        n_col += 1
+        if prim.HasAPI(UsdPhysics.MeshCollisionAPI):
+            n_mesh += 1
+            attr = UsdPhysics.MeshCollisionAPI(prim).GetApproximationAttr()
+            approximations.add(attr.Get() if attr else None)
+
+    print(f'verify: {n_col} collision prims ({n_mesh} mesh, '
+          f'approximations={sorted(str(a) for a in approximations) or "n/a"}), '
+          f'{n_rigid} rigid bodies')
+
+    problems = []
+    if n_col < len(manifest['bodies']):
+        problems.append(f'{n_col} collision prims for {len(manifest["bodies"])} '
+                        f'manifest bodies — some body has no collider, so the '
+                        f'robot will pass through geometry the lidar still sees')
+    if n_rigid:
+        problems.append(f'{n_rigid} rigid bodies, expected 0 — every manifest '
+                        f'body is static; a rigid body makes the arena collapse '
+                        f'on play()')
+    bad_approx = approximations - {'none'}
+    if bad_approx:
+        problems.append(f'mesh collision approximations {sorted(bad_approx)} — '
+                        f'must be "none" (exact). A convex hull of a hollow wall '
+                        f'is a solid prism and seals the robot inside')
+    if problems:
+        raise SystemExit('build_world_usd: collider checks failed:\n  '
+                         + '\n  '.join(problems))
+
     expect = manifest.get('verify')
     if not expect:
         print('verify: manifest declares no expected bounds; skipping '

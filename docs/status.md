@@ -70,3 +70,38 @@
   unresolved, not blocking since `import_tb3.py` uses the offline xacro path
   instead. Worth revisiting before `build_scene.py`'s OmniGraph nodes (which
   DO need the bridge, to publish /clock, /scan, /odom etc.) can be verified.
+
+## World registry (`worlds/`)
+
+One manifest per environment drives both simulators; the Gazebo `.world` and
+the Isaac Sim `.usd` are generated from it and the meshes are shared
+byte-for-byte. `bringup.launch.py world:=<name>` selects it for Gazebo,
+`WORLD=<name>` for Isaac Sim. Adding an environment is a directory, not a code
+change. See `worlds/README.md`.
+
+`turtlebot3_world` verified working in **both** backends from the same manifest:
+
+- **Gazebo** — `get_model_list` reports `ground_plane, turtlebot3_world,
+  burger`; shared meshes resolve through `model://` off `/worlds`;
+  `/scan` returns 324 of 360 rays finite, 0.511-3.357 m.
+- **Isaac Sim** — stage referenced at `/World/env`, robot spawned at the
+  manifest's `(-2.0, -0.5)`, `/scan` returns 3372 of 3600 rays positive,
+  0.526-3.497 m. Previously, on the bare ground plane, only 652 of 3600 were
+  hits and all of those were the phantom tilt ring.
+- **Parity evidence**: closest return 0.511 m (Gazebo) vs 0.526 m (Isaac) from
+  the same spawn pose — 1.5 cm apart, i.e. the two backends are measuring the
+  same geometry. Generation is idempotent (regenerating matches the committed
+  output byte-for-byte).
+- The generator self-checks: 15 collision prims for 15 manifest bodies, all 6
+  mesh colliders at approximation `none` (exact), 0 rigid bodies, and world
+  bounds within 2 cm of the value computed analytically from the meshes and
+  placements. Those checks caught two real bugs on first run, both of which
+  produce a valid-looking stage and no error — see `docs/history.md`.
+
+Still open, and unchanged by this work:
+
+- The `/scan` differences between backends are the **known lidar problem**, not
+  a world problem: Isaac publishes 3600 rays where Gazebo publishes 360, and
+  reports no-return as `-1.0` (228 rays) where Gazebo uses `inf` (36 rays).
+  Authoring a real LDS scan pattern is still the fix.
+- `nav:=true` still requires a map that does not exist yet.

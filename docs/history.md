@@ -264,3 +264,91 @@ mismatch error, in keeping with everything else in this stack.
 `/scan` came in at 0.66 Hz against a configured 10 Hz. The machine was under
 load from other containers, so this is not necessarily a regression and was not
 investigated. Re-measure on an idle host before drawing any conclusion.
+
+## 2026-09-06 (later) — one manifest, two simulators
+
+**Goal.** Stop hardcoding environments. `gazebo.launch.py` pointed at
+`turtlebot3_gazebo`'s installed `turtlebot3_world.world` and Isaac Sim had no
+environment at all, so adding a second world meant editing launch files and the
+two backends shared no definition that could keep them in agreement.
+
+**Concept — no world ships in both formats, so share the geometry instead.**
+The instinct is to hunt for an environment distributed as both SDF and USD.
+There isn't one (checked; the AWS RoboMaker warehouse is Gazebo-only, NVIDIA's
+warehouses are USD-only). The workable definition of "the same asset" is a
+shared *mesh* plus a manifest, with each simulator's wrapper generated from it.
+That also happens to be exactly what a scanned office will need, since a scan
+is a mesh and both simulators consume meshes — so the pipeline generalises,
+whereas an SDF parser would have been thrown away.
+
+**Design.** `worlds/<name>/world.yaml` is the source of truth.
+`scripts/build_world.py` generates the Gazebo `.world` (+ `model.config`, so
+`model://` resolves off `/worlds` on `GAZEBO_MODEL_PATH`);
+`isaac/scripts/build_world_usd.py` generates the Isaac `.usd`. Meshes under
+`meshes/` are shared byte-for-byte. `tb3_bringup/worlds.py` resolves the
+registry for the ROS side. The registry is a plain directory tree, not an ament
+package, because the isaacsim container has no ROS and cannot call
+`get_package_share_directory`; both containers mount it at `/worlds`.
+`turtlebot3_world`'s 15 bodies were derived mechanically from upstream's
+`model.sdf` rather than retyped.
+
+**Concept — `world:=` is refused for `backend:=isaacsim` rather than ignored.**
+Isaac Sim runs in its own container and bringup only attaches to it over DDS, so
+accepting the argument would imply a control the ROS side does not have. The
+error names `WORLD=` instead. Silently ignoring it would have been the kind of
+thing that costs an hour later.
+
+**Problem — the bounds check earned itself back on the first run.** The manifest
+carries a `verify.bounds_*` block computed analytically from the meshes and
+placements, and the generator fails if the assembled stage disagrees. It caught
+two bugs immediately, both of which produce a stage that loads clean, renders
+something plausible, and reports no error:
+
+1. *Collada up-axis.* `wall.dae`/`hexagon.dae` declare `up_axis Y_UP` but lay
+   their vertices out Z-up (hexagon in XY, extruded along Z). Gazebo ignores the
+   label and draws them upright. The converter faithfully copies both vertices
+   and label, so referencing the result into a Z-up stage made
+   `add_reference_to_stage` insert a corrective 90-degree X rotation — tipping
+   the Isaac arena on its side while Gazebo stayed correct. Fixed with
+   `convert_stage_up_z`, which a probe showed moves no geometry at all and only
+   rewrites metadata. Units were never the problem: the converter applies
+   `<unit>` correctly (raw 450 -> 11.43 m).
+2. *Poses silently dropped.* Referencing brings the converted asset's own
+   `translate/orient/scale` onto the prim, and `XformCommonAPI` cannot author a
+   `rotateXYZ` over an `orient` — it returns **False rather than raising**. Every
+   mesh body sat at the origin at asset scale. The pose now goes on a wrapper
+   Xform with the reference on a child, and the return values are checked.
+
+**Concept — a cache keyed on mtime hides a flag change.** After fixing (1), the
+rebuild reused the stale converted meshes and "failed" identically, because the
+cache compares mtimes and the converter *flags* had changed, not the inputs.
+Worse, the cache directory was created by the container as uid 1234 and could
+not be cleared from the host, so the obvious fix also failed. The cache dir is
+now chmod 777 by its creator. When a rebuild reproduces a bug you just fixed,
+suspect the cache before the fix.
+
+**Concept — confine the uid-1234 output, don't chmod the tree.** The isaacsim
+container cannot write into a checkout owned by you, and git records no
+directory modes, so this cannot be fixed by committing anything. Build products
+go in `worlds/<name>/isaac/`, created world-writable by
+`scripts/build_world_usd.sh`. Files inside end up owned by 1234 but remain
+deletable, because deletion depends on the *parent* directory being writable by
+you — which is why this beats chmod-ing the world directory.
+
+**Concept — `SimulationApp.close()` hard-exits.** It swallowed both the
+traceback and the exit status, so a failing generator looked exactly like a
+successful one: silent, status 0. Any standalone Isaac script needs to catch,
+print, flush and force the status itself before closing.
+
+**Verified.** Same manifest, both backends. Gazebo: `get_model_list` shows
+`turtlebot3_world`, `/scan` 324/360 finite, 0.511-3.357 m. Isaac Sim: stage at
+`/World/env`, robot spawned at the manifest's `(-2.0, -0.5)`, `/scan` 3372/3600
+positive, 0.526-3.497 m (it was 652/3600 phantom hits on the bare ground plane).
+Closest return agrees to 1.5 cm across backends from the same spawn — the real
+parity evidence. Generator self-checks 15 colliders for 15 bodies, all mesh
+approximations `none`, 0 rigid bodies. SDF generation is idempotent.
+
+**Open — the `/scan` gap between backends is the lidar, not the world.** Isaac
+publishes 3600 rays to Gazebo's 360 and uses `-1.0` for no-return where Gazebo
+uses `inf`. Unchanged by this work; authoring a real LDS scan pattern is still
+the fix, and it is still what stands between here and Nav2.
