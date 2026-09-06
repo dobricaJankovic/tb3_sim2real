@@ -9,12 +9,24 @@
 FROM ros:humble-ros-base
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV ROS_DISTRO=humble
 ENV COLCON_WS=/ws
+# ROS_DISTRO is inherited from the base image and is deliberately not re-set
+# here: declaring it again would silently disagree with the base if the FROM
+# tag above ever changes.
 
 # --- Nav2 + visualisation + the shared bits -----------------------------------
+# rviz2 rather than the ros-humble-desktop metapackage. Desktop pulls 91 extra
+# packages (~577 MB against ~111 MB) and nearly all of it is tutorials and demos
+# — turtlesim, the rclcpp/rclpy minimal examples, pendulum, the dummy robot.
+# nav2-bringup depends on rviz-common but NOT on rviz2, so RViz has to be asked
+# for by name or rviz/tb3.rviz has nothing to open it.
+#
+# demo-nodes-cpp is kept on purpose despite being a demo: talker/listener is the
+# cheapest cross-container DDS check there is, and the failures on this project
+# are usually silent ones where that is exactly what you want to reach for.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ros-${ROS_DISTRO}-desktop \
+    ros-${ROS_DISTRO}-rviz2 \
+    ros-${ROS_DISTRO}-demo-nodes-cpp \
     ros-${ROS_DISTRO}-navigation2 \
     ros-${ROS_DISTRO}-nav2-bringup \
     ros-${ROS_DISTRO}-robot-state-publisher \

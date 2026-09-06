@@ -8,6 +8,14 @@
 # They only ever talk over DDS. Both need the SAME ROS_DOMAIN_ID and a shared
 # /dev/shm (ipc: host), or discovery works and data silently does not.
 #
+# BOTH services are network_mode: host, and that has to stay symmetric. The
+# official ROS image docs warn that host networking "removes the networking
+# namespace separation between containers, and can affect the ability of DDS
+# participants to communicate between containers" — that warning is about
+# *mixing* the two. Because both sit in the host namespace they behave as one
+# machine and discovery works. Move either service onto a bridge network and
+# the pairing breaks in the usual silent way: topics discovered, no data.
+#
 #   ./docker/x11-auth.sh                 # once per X session, before either
 #   docker compose run --rm isaacsim     # the simulator; leave it running
 #   docker compose run --rm tb3_ros      # second terminal, then bringup
@@ -127,6 +135,18 @@ services:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - ${TB3_XAUTH:-/tmp/tb3_sim2real.docker.xauth}:/root/.Xauthority:ro
       - ./tb3_bringup:/ws/src/tb3_bringup   # edit on host, colcon build inside
+      # ROS writes its logs to ~/.ros, which is /root/.ros for this image. We
+      # mostly `run --rm`, so without this every log is destroyed on exit — and
+      # the failures here are usually the silent kind you can only diagnose
+      # afterwards.
+      #
+      # A named volume rather than a bind mount, deliberately: this container
+      # runs as root, so a bind mount would create a root:root directory inside
+      # the repo that you cannot delete without sudo. Read the logs with
+      #   docker compose run --rm tb3_ros ls /root/.ros/log
+      # and discard them with
+      #   docker volume rm tb3_sim2real_ros_logs
+      - ros_logs:/root/.ros
     working_dir: /ws
     command: bash
     stdin_open: true
@@ -137,3 +157,7 @@ services:
           devices:
             - capabilities: [gpu]         # gzserver/gzclient GLX rendering needs the real driver,
                                            # not the nouveau fallback picked up without this
+
+volumes:
+  # ROS log directory for tb3_ros; see that service's volumes entry.
+  ros_logs:
