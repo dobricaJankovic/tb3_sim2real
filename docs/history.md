@@ -204,3 +204,51 @@ reports no-return as `-1.0` rather than Gazebo's `inf`. Re-rating the config to
 5 Hz / 360 samples advertises the right geometry but makes publishing erratic
 and trips `Multi-tick is enabled but motion BVH is not active`, so the real fix
 is authoring an LDS scan pattern rather than bending this one.
+
+## 2026-09-06 — can Isaac Sim and ROS share one container?
+
+**Problem — the stated reason for the two-container split was wrong.** The split
+was justified by "Humble is Python 3.10, Isaac Sim 6.0 is Python 3.12". That is
+not a blocker. Kit bundles its own interpreter (`/isaac-sim/kit/python`, 3.12.13)
+and the image has no system Python at all, so the two never meet. ROS 2 Python
+code does not run inside Kit — the OmniGraph ROS nodes are C++.
+
+**Concept — Isaac Sim's env setup appends, so a sourced ROS wins.**
+`setup_python_env.sh` does `export PYTHONPATH=$PYTHONPATH:...` and the same for
+`LD_LIBRARY_PATH`. Anything a sourced ROS 2 installation put there stays *ahead*
+of Kit's own entries, so Kit loads the wrong interpreter's modules and aborts.
+`docker/isaacsim-ros2/ros-isolate` strips `/opt/ros` and every sourced overlay
+prefix out of `PATH`/`PYTHONPATH`/`LD_LIBRARY_PATH`, unsets the ament discovery
+variables, and leaves `ROS_DOMAIN_ID`/`RMW_IMPLEMENTATION` untouched so the
+simulator stays on the same DDS domain. This is the same fix NVIDIA's
+`isaacsim_bringup/run_isaacsim.py` applies in `update_env_vars()`; in a merged
+container it becomes necessary rather than redundant.
+
+**Fixed — one container works, on 24.04/Jazzy.** `docker/isaacsim-ros2/` builds
+`isaacsim6-jazzy` from `ros:jazzy-ros-base` plus `COPY --from` of the Isaac Sim
+tree. `verify.sh` passes 5/5: ROS tooling, Gazebo, env isolation, Kit starting,
+and `/clock` published by the bridge and received by the system ROS 2
+installation *in the same container*.
+
+**Open — the 22.04/Humble image is blocked upstream by glibc.** Kit itself runs
+fine on Jammy (the `kit` binary and `libcarb.so` need at most `GLIBC_2.34`;
+Jammy has 2.35), and 1085 of 1094 Isaac Sim extension libraries are within that
+ceiling. Nine require `GLIBC_2.38`, which only Noble provides — and three of
+them are the bridge: `libisaacsim.ros2.core.humble.so`,
+`libisaacsim.ros2.core.jazzy.so`, `libisaacsim.ros2.nodes.plugin.so`. Both
+bundled distros fail identically, so this is a build-host artifact, not a
+Humble-versus-Jazzy issue. The remaining path is building Isaac Sim from source
+on Jammy — `setup.sh` says "Tested on: Ubuntu 22.04 / 24.04" — which would
+recompile those nine against 2.35.
+
+**Concept — check the libraries you actually need, not a representative one.**
+The decision to try this rested on sampling `kit` and `libcarb.so` for their
+glibc ceiling. Those are the portable Kit SDK; Isaac Sim's *own* extension
+libraries are built against the build host and were the ones that mattered.
+Scanning two binaries out of eleven hundred looked like evidence and was not.
+
+**Concept — `ros2 topic echo --once` does not wait for a publisher.** It reports
+`topic does not appear to be published yet` and exits, so using it to check a
+simulator that takes ~25 s to boot tests the race, not the bridge. Poll
+`ros2 topic list` for the topic first. This produced a false failure that looked
+exactly like the real glibc failure on the other image.

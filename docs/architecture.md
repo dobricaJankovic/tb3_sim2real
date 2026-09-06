@@ -11,9 +11,19 @@ this package. They only ever meet on the DDS wire.
 Python code had to run *inside* Kit's interpreter. It doesn't — Isaac Sim's
 OmniGraph ROS 2 nodes are C++ against bundled libs that include
 `libfastrtps.so.2.6.10`, the same Fast-DDS version stock Humble ships. Same RTPS,
-same Humble message definitions. A single container is also blocked outright:
-`isaacsim-6.0/tools/docker/Dockerfile` is `FROM nvcr.io/nvidia/base/ubuntu:noble`,
-and Humble has no binaries for noble.
+same Humble message definitions.
+
+**A single container is blocked by glibc, not by Python.** Tested on 2026-09-06;
+see `docker/isaacsim-ros2/`, which builds exactly that image. Kit runs on jammy —
+the `kit` binary and `libcarb.so` need at most `GLIBC_2.34` and jammy has 2.35 —
+and so do 1085 of Isaac Sim's 1094 extension libraries. Nine need `GLIBC_2.38`,
+which only noble provides, and three of those nine are the bridge:
+`libisaacsim.ros2.core.humble.so`, `libisaacsim.ros2.core.jazzy.so` and
+`libisaacsim.ros2.nodes.plugin.so`. Both bundled distros fail the same way, so
+this is a property of NVIDIA's build host rather than a Humble/Jazzy question.
+The same image on noble/Jazzy passes end to end, so the arrangement is sound and
+only the prebuilt binaries are in the way; building Isaac Sim from source on
+jammy (`setup.sh`: "Tested on: Ubuntu 22.04 / 24.04") would close it.
 
 Full write-up: <https://claude.ai/code/artifact/f7809bfe-4918-4977-938c-e008f28c46e3>
 
