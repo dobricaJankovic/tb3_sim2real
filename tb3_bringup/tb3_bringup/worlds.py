@@ -84,7 +84,7 @@ def usd_file(name, worlds_root=None):
     the ROS side cannot meaningfully verify it.
     """
     r = worlds_root or root()
-    return os.path.join(r, name, f'{name}.usd')
+    return os.path.join(r, name, 'isaac', f'{name}.usd')
 
 
 def spawn(name, worlds_root=None):

@@ -31,6 +31,26 @@ spawn:
 # Mesh collisions must stay EXACT (triangle mesh), never a convex hull: the wall
 # is a thin hexagonal shell whose convex hull is a solid prism, which would seal
 # the robot inside the arena at spawn.
+
+# Expected world-space bounding box of the assembled stage, in metres.
+# build_world_usd.py checks the generated USD against this and fails loudly if
+# it disagrees. Optional per world, but strongly advised for anything using
+# Collada, because it is the only thing that catches the unit/up-axis trap:
+#
+#   Both meshes here declare `<unit name="inch" meter="0.0254"/>` and
+#   `up_axis Y_UP`, yet their vertices are laid out Z-up (the hexagon lies in
+#   XY, extruded along Z). Gazebo draws them upright, so Z-up is the parity
+#   truth. A converter that instead HONOURS the Y_UP header tips the Isaac
+#   arena on its side while Gazebo stays correct, and one that ignores <unit>
+#   makes it 39.4x too large. Neither reports an error.
+#
+# Computed analytically from the meshes and the placements below, under the
+# Z-up reading, i.e. from what Gazebo actually renders.
+verify:
+  bounds_min: [-3.2996, -3.3985, -0.5]
+  bounds_max: [4.6732, 3.3985, 1.532]
+  tolerance: 0.02
+
 bodies:
   - name: one_one
     geometry: {type: cylinder, radius: 0.15, length: 0.5}
