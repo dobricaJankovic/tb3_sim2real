@@ -26,12 +26,19 @@ services:
       - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-30}
       - DISPLAY=${DISPLAY}
       - QT_X11_NO_MITSHM=1
-      # Container runs as root, but host X access control is per-UID
-      # (`SI:localuser:<you>`), so the X11 socket mount alone isn't enough —
-      # GUI opens fail auth. XAUTHORITY here points at a cookie file docker/
-      # x11-auth.sh generates on the host and re-keys under a wildcard family;
-      # run that script before `docker compose up/run`.
-      - XAUTHORITY=/root/.Xauthority
+      # Host X access control is per-UID (`SI:localuser:<you>`), so the X11
+      # socket mount alone isn't enough — GUI opens fail auth. XAUTHORITY
+      # points at a cookie docker/x11-auth.sh generates on the host and re-keys
+      # under a wildcard family; run that script before `docker compose up/run`.
+      #
+      # NOT /root/.Xauthority (which is what tb3_ros uses): NVIDIA's Dockerfile
+      # ends with `USER isaac-sim`, so this container runs as uid 1234, not
+      # root, and cannot traverse /root. Mounting there fails silently — Kit
+      # logs "GLFW initialization failed" / "IAppWindow::startup failed" and
+      # runs on with no window, while the healthcheck still reports healthy
+      # because it only greps the log for AppReady. /tmp is chowned to
+      # isaac-sim by the image, so the cookie is readable here.
+      - XAUTHORITY=/tmp/.docker.xauth
       # Verified against a live probe: leaving ROS_DISTRO unset does NOT make
       # isaacsim.ros2.core fall back cleanly — it logs "ROS2 Bridge startup
       # failed" (librmw_implementation.so -> missing libament_index_cpp.so)
@@ -44,7 +51,7 @@ services:
       - LD_LIBRARY_PATH=/isaac-sim/exts/isaacsim.ros2.core/jazzy/lib
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
-      - ${TB3_XAUTH:-/tmp/tb3_sim2real.docker.xauth}:/root/.Xauthority:ro
+      - ${TB3_XAUTH:-/tmp/tb3_sim2real.docker.xauth}:/tmp/.docker.xauth:ro
       - ./isaac/scenes:/scenes   # rw: build_scene.py's --save and the URDF importer both write here
       - ./isaac/scripts:/scripts:ro
     deploy:
@@ -89,8 +96,10 @@ services:
       - GAZEBO_MODEL_DATABASE_URI=
       - DISPLAY=${DISPLAY}
       - QT_X11_NO_MITSHM=1
-      # See the isaacsim service's XAUTHORITY comment above — same root-uid
-      # vs per-UID X access control issue, same docker/x11-auth.sh fix.
+      # Same per-UID X access control issue and same docker/x11-auth.sh fix as
+      # the isaacsim service above, but this image does run as root, so /root
+      # is a fine place for the cookie. That is the only reason the two
+      # services mount it at different paths.
       - XAUTHORITY=/root/.Xauthority
     volumes:
       - /dev:/dev

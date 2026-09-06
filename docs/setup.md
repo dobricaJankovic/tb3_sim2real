@@ -1,6 +1,7 @@
 # Getting started
 
 ```bash
+./docker/x11-auth.sh                   # once per X session, before any GUI container
 docker compose build tb3_ros
 docker compose up -d isaacsim          # or skip, for gazebo/real
 docker compose run --rm tb3_ros
@@ -10,6 +11,28 @@ scripts/seed_nav2_params.sh            # populate the three placeholder configs
 colcon build --symlink-install && source install/setup.bash
 ros2 launch tb3_bringup bringup.launch.py backend:=gazebo
 ```
+
+## X11 for the GUI containers
+
+Neither container runs as *you*, but the host X server's access control is
+per-user, so a plain `DISPLAY` + `/tmp/.X11-unix` mount isn't enough —
+`gzclient`/RViz/Kit abort with `Authorization required, but no authorization
+protocol specified`. `docker/x11-auth.sh` writes a docker-specific Xauthority
+cookie that compose mounts into both services. Run it once per X session
+(log in / restart X) before bringing up either container — the cookie rotates
+on login, so a stale one fails the same way.
+
+The two services mount that cookie at **different paths**, and it matters:
+`tb3_ros` runs as root and reads it from `/root/.Xauthority`, but the Isaac Sim
+image ends with `USER isaac-sim`, so `isaacsim` runs as uid 1234 and cannot
+traverse `/root` — it reads the cookie from `/tmp/.docker.xauth` instead.
+Getting this wrong fails *silently*: Kit logs `GLFW initialization failed` and
+`IAppWindow::startup failed`, then runs on with no window, while the container's
+healthcheck still reports `healthy` because it only greps the log for
+`AppReady`. If you think Isaac Sim is up but see no window, check the Kit log
+under `/isaac-sim/.nvidia-omniverse/logs/Kit/` before anything else.
+
+See `docs/troubleshooting.md` for the full explanation.
 
 ## Where the two images come from
 

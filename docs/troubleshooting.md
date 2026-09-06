@@ -16,14 +16,26 @@
   subscriber against a Best Effort publisher shows up in `ros2 topic list` while
   delivering nothing.
 - **X11 for two containers.** Both Isaac Sim and RViz need `DISPLAY` and
-  `/tmp/.X11-unix`. Both containers run as root, but host X access control is
-  per-UID (`xhost` shows `SI:localuser:<you>`, not root), so the socket mount
-  alone isn't enough — `gzclient`/RViz/Kit abort with "Authorization required,
-  but no authorization protocol specified". Run `docker/x11-auth.sh` once per
-  X session before `docker compose up/run` — it writes a re-keyed Xauthority
-  cookie that compose mounts to `/root/.Xauthority` (`XAUTHORITY` env var) in
-  both services. (`xhost +local:root` also works but permanently loosens
-  host X access control instead of scoping a cookie.)
+  `/tmp/.X11-unix`. Neither container runs as you, but host X access control is
+  per-UID (`xhost` shows `SI:localuser:<you>`), so the socket mount alone isn't
+  enough — `gzclient`/RViz/Kit abort with "Authorization required, but no
+  authorization protocol specified". Run `docker/x11-auth.sh` once per X session
+  before `docker compose up/run` — it writes a re-keyed Xauthority cookie
+  (family `ffff`, so it matches any hostname) that compose mounts into both
+  services. (`xhost +local:root` also works but permanently loosens host X
+  access control instead of scoping a cookie.)
+- **The two services mount that cookie at different paths.** `tb3_ros` runs as
+  root and reads `/root/.Xauthority`. `isaacsim` does *not* run as root —
+  NVIDIA's Dockerfile ends with `USER isaac-sim` (uid 1234, home `/isaac-sim`),
+  and uid 1234 cannot traverse `/root`, so it reads `/tmp/.docker.xauth`
+  instead (`/tmp` is chowned to `isaac-sim` by the image). Mounting the cookie
+  under `/root` for `isaacsim` fails **silently**: Kit logs `GLFW initialization
+  failed`, `failed to open the default display`, and `IAppWindow::startup
+  failed`, then keeps running with no window — and `docker ps` still says
+  `healthy`, because the image's healthcheck only greps the Kit log for
+  `AppReady`. Symptom: "the container is up but no Isaac Sim window appeared."
+  Check `/isaac-sim/.nvidia-omniverse/logs/Kit/*/*/kit_*.log` for the GLFW
+  lines to confirm.
 - **No GPU in `tb3_ros`.** Without a `deploy.resources.reservations.devices:
   [gpu]` block (compose has it now), `gzserver`/`gzclient` silently fall back
   to `nouveau` and die with `libGL error: failed to load driver: nouveau`.

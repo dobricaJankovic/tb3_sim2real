@@ -39,3 +39,38 @@ showed the full Gazebo widget tree, no auth error in the log).
 recommended `xhost +local:docker` — that permanently loosens host X access
 control instead of scoping a single cookie file, and doesn't get mentioned
 again here for that reason.
+
+## 2026-09-06 — Isaac Sim GUI never opened: the container is not root
+
+**Problem:** `docker compose up -d isaacsim` reported `healthy` and the ROS 2
+bridge loaded, but no Isaac Sim window ever appeared on the host.
+
+**Root cause:** the previous entry's X11 fix assumed *both* containers run as
+root. That is false for `isaacsim`. NVIDIA's `tools/docker/Dockerfile` ends
+with `USER isaac-sim` (uid 1234, home `/isaac-sim`), so mounting the Xauthority
+cookie at `/root/.Xauthority` put it somewhere uid 1234 cannot even traverse:
+
+    $ docker exec isaacsim ls -la /root/.Xauthority
+    ls: cannot access '/root/.Xauthority': Permission denied
+
+Kit does not treat that as fatal. It logs `GLFW initialization failed`,
+`failed to open the default display`, `Failed to acquire IWindowing interface`
+and `IAppWindow::startup failed`, then runs on windowless. The image's
+healthcheck only greps the Kit log for `AppReady`, so `docker ps` still says
+`healthy` — the failure is completely silent from the outside.
+
+**Fix:** mount the cookie at `/tmp/.docker.xauth` for the `isaacsim` service
+and point `XAUTHORITY` there (`/tmp` is chowned to `isaac-sim` by the image).
+`tb3_ros` genuinely does run as root, so it keeps `/root/.Xauthority` — the two
+services now mount the same cookie at deliberately different paths, and the
+compose comments say why. Verified: uid 1234 can now stat and read all 134
+bytes of the cookie, where before it got EACCES.
+
+Also corrected the "both containers run as root" claim in `docs/setup.md`,
+`docs/troubleshooting.md` and `docker/x11-auth.sh`'s header, and documented the
+healthy-but-windowless symptom so the next person recognises it.
+
+**Concept — silent GUI failure vs. loud one.** `gzclient` aborts with SIGABRT
+when it can't authenticate; Kit shrugs and keeps going. Same root cause, but
+only one of them tells you. Whenever a GUI container reports healthy and shows
+nothing, read the app's own log before touching DISPLAY or xhost.
