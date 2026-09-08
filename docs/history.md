@@ -395,3 +395,72 @@ ROS topics all work — every signal short of looking at your screen says fine.
 Both known causes of a windowless Kit (wrong cookie path for uid 1234, and now
 a directory in place of the cookie) present identically, which is why the log
 grep for `GLFW initialization failed` is the diagnostic that matters.
+
+## 2026-09-08 (later) — Nav2 running: stock map + RViz view, and two bugs on the way
+
+**Concept — the params were already correct; only the map and the view were
+missing.** The instinct was to re-copy `nav2_params.yaml` from
+`turtlebot3_navigation2`. Checking first showed `config/nav2_{gazebo,isaacsim,
+real}.yaml` were already byte-identical to
+`turtlebot3_navigation2/param/humble/burger.yaml` — and identical to each
+other, the seeded state `status.md` describes. Worth noting *which* upstream
+file that is: the package ships both `param/burger.yaml` and
+`param/humble/burger.yaml`, its own launch picks the latter on Humble, and they
+differ (12822 vs 9839 bytes). Copying the wrong one is a silent downgrade. So
+this reduced to `maps/` (which did not exist) and `rviz/tb3.rviz` (a stub).
+
+**Concept — which frame the stock map is in, decided from the map, not from
+folklore.** `map.yaml` gives origin `[-10, -10]` at 0.05 m/px, which says
+nothing about where the arena sits. Reading the `.pgm` and converting occupied
+cells to world coordinates put them at x[-2.95, 2.65], y[-2.60, 2.55], centred
+on `(-0.15, -0.03)`. The arena is centred on the world origin, so **the map
+frame is the Gazebo world frame**, and the initial pose is the manifest's spawn
+`(-2.0, -0.5)`, not `(0, 0)`. (Had the map been SLAM'd from the robot's start,
+the arena would have sat at `(+2.0, +0.5)` instead.) `nav2_bringup`'s
+`tb3_simulation_launch.py` defaults agree — `x_pose -2.00`, `y_pose -0.50`.
+Confirmed live afterwards: `map->odom` settled at `(0.033, 0.030)`, i.e. the
+two frames coincide.
+
+**Concept — initial pose by topic, no RViz click needed.** Publishing
+`/initialpose` (`geometry_msgs/PoseWithCovarianceStamped`, `frame_id: map`) is
+exactly what the "2D Pose Estimate" button does, so the whole bringup is
+scriptable. Use `--times 5 -w 1`: AMCL's subscription is volatile, so a single
+`--once` can be published before discovery completes and land nowhere. The
+alternative is AMCL's own `set_initial_pose: true` + `initial_pose.{x,y,z,yaw}`
+parameters, which skips the topic entirely — not used here, to keep the seeded
+params byte-identical to upstream. Goals go the same way, to `/goal_pose`
+(`PoseStamped`); `bt_navigator` subscribes and forwards to its own action.
+
+**Problem — `backend:=gazebo` alone could never have worked.** The documented
+invocation died with `world '' has no generated .world`.
+`IncludeLaunchDescription` does not isolate launch configurations: the parent's
+`world`, declared with `default_value=''` to mean "let the backend choose",
+leaked into `backends/gazebo.launch.py` and beat its
+`default_value='turtlebot3_world'`, because `DeclareLaunchArgument` only fills
+in a value that is not already set. The empty-means-default comment in
+`bringup.launch.py` was describing an intention the code did not implement.
+Fixed by wrapping each include in `GroupAction(scoped=True, forwarding=False)`,
+which fixes the whole class rather than this one argument.
+
+**Problem — the stock RViz config is newer than this Nav2.** It lists
+`nav2_rviz_plugins/Selector` and `.../Docking` panels; Humble's
+`nav2_rviz_plugins` declares only `Navigation 2`, so RViz threw two
+`PluginlibFactory` errors at startup and rendered both panels as error text
+down the right-hand side. Dropped from the config.
+
+**Verified.** Clean launch, no errors: `ros2 launch tb3_bringup
+bringup.launch.py backend:=gazebo nav:=true rviz:=true`, with no `world:=`.
+Gazebo GUI at RTF 1.00 / 62.5 FPS, RViz with Global Status Ok and Fixed Frame
+`map`, all lifecycle nodes `active [3]`. Published `/initialpose` at the spawn;
+AMCL converged to `(-1.967, -0.469)`. Goal `(2.0, 0.0)` -> stopped at
+`(2.003, -0.009)`, ~9 mm out. Goal `(1.5, 1.5)` -> `controller_server: Reached
+the goal!`, `bt_navigator: Goal succeeded`, RViz panel `Feedback: reached`,
+0 recoveries.
+
+**Concept — screenshotting this host needs two homemade tools.** No ImageMagick
+and no `xdotool`/`wmctrl`, and PIL ships no XWD plugin, so verifying "does the
+GUI actually appear" needed a small XWD->PNG parser plus an EWMH
+`_NET_ACTIVE_WINDOW` raiser (plain `XRaiseWindow` is overridden by mutter).
+Without raising, `xwd -id` on an occluded window captures whatever is drawn on
+that screen region — the first "RViz" capture was Gazebo's viewport. Both live
+in the session scratchpad, not the repo; rebuild them if this comes up again.

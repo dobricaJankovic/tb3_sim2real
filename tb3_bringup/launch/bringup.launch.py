@@ -13,7 +13,12 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
+from launch.actions import (
+    DeclareLaunchArgument,
+    GroupAction,
+    IncludeLaunchDescription,
+    OpaqueFunction,
+)
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 
@@ -33,9 +38,27 @@ def setup(context, *args, **kwargs):
     use_sim_time = 'false' if backend == 'real' else 'true'
 
     def inc(rel, **extra):
-        return IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(os.path.join(pkg, 'launch', rel)),
-            launch_arguments={'use_sim_time': use_sim_time, **extra}.items(),
+        # scoped + forwarding=False, and both halves are load-bearing.
+        #
+        # IncludeLaunchDescription on its own does NOT isolate launch
+        # configurations: everything declared here leaks into the included file,
+        # where it takes precedence over that file's own DeclareLaunchArgument
+        # default (a declaration only fills in a value that is not already set).
+        # So `world` — declared below with default '' to mean "don't override" —
+        # arrived at backends/gazebo.launch.py as a literal empty string and beat
+        # its `default_value='turtlebot3_world'`, making the documented
+        #
+        #   ros2 launch tb3_bringup bringup.launch.py backend:=gazebo
+        #
+        # die with "world '' has no generated .world". The empty-means-default
+        # contract right below is only true with this group in place.
+        return GroupAction(
+            [IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(os.path.join(pkg, 'launch', rel)),
+                launch_arguments={'use_sim_time': use_sim_time, **extra}.items(),
+            )],
+            scoped=True,
+            forwarding=False,
         )
 
     # Only the simulated backends take a world, and only Gazebo can act on it

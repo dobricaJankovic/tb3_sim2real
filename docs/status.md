@@ -1,15 +1,25 @@
 # Status
 
-`backend:=gazebo nav:=false` verified working end-to-end: `gzserver`,
-`gzclient` (GUI over X11), robot spawn, and all interface-contract topics
-(`/scan`, `/odom`, `/tf`, `/joint_states`, `/cmd_vel`, `/clock`) confirmed live.
+`backend:=gazebo nav:=true` verified working end-to-end, autonomous navigation
+included: `gzserver`, `gzclient` and RViz all on screen over X11, robot spawn,
+all interface-contract topics (`/scan`, `/odom`, `/tf`, `/joint_states`,
+`/cmd_vel`, `/clock`) live, AMCL localised and Nav2 driving the robot to a
+commanded goal. See `docs/history.md` for the run's numbers.
 
 - `config/nav2_*.yaml` are seeded (stock `turtlebot3_navigation2` params,
   identical across backends) — the tuning divergence per backend is still
-  unstarted.
-- `maps/map.yaml` does not exist yet — `nav:=true` will fail until a real map
-  is produced (run SLAM, save it).
-- `rviz/tb3.rviz` is still a stub; save a real one out of RViz.
+  unstarted. Verified byte-identical to
+  `turtlebot3_navigation2/param/humble/burger.yaml`, i.e. the Humble-specific
+  variant, not the newer one beside it.
+- `maps/map.yaml` + `map.pgm` are the stock `turtlebot3_navigation2` map,
+  copied in. Its frame coincides with the Gazebo world frame (occupied cells
+  centre on the origin), so the initial pose to feed AMCL is the world
+  manifest's spawn, `(-2.0, -0.5)` yaw 0 — the same numbers `nav2_bringup`
+  uses as `x_pose`/`y_pose`. A SLAM-produced map of our own generated world is
+  still worth having; this one is upstream's recording.
+- `rviz/tb3.rviz` is the stock `turtlebot3_navigation2` view (Map, LaserScan,
+  RobotModel, TF, both costmaps, `/plan`, particle cloud, Navigation 2 panel),
+  minus two post-Humble panels this Nav2 cannot load.
 - `backend:=real` is unverified.
 - `isaac/scripts/tb3_sim.py` (replaces the old `build_scene.py`) is the Isaac Sim
   *simulator launcher*, not a scene-editing helper: it boots Kit, opens the
