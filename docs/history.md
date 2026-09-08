@@ -352,3 +352,46 @@ approximations `none`, 0 rigid bodies. SDF generation is idempotent.
 publishes 3600 rays to Gazebo's 360 and uses `-1.0` for no-return where Gazebo
 uses `inf`. Unchanged by this work; authoring a real LDS scan pattern is still
 the fix, and it is still what stands between here and Nav2.
+
+## 2026-09-08 — The X cookie was a directory: same windowless Kit, new cause
+
+**Problem — "isaacsim is up but no window appeared", again.** The container was
+healthy and fully functional: stage loaded at `/World/env`, physics playing,
+`/clock /odom /joint_states /scan` publishing, `/cmd_vel` subscribed. Only the
+GUI was missing. The log had the familiar trio — `Authorization required, but
+no authorization protocol specified`, `GLFW initialization failed`,
+`IAppWindow::startup failed` — plus `Cannot setup ExternalDragDrop without a
+default window` and `Hotkeys cannot be setup without a default window`.
+
+**Fix — the cookie path was a root-owned *directory*, not a file.**
+`/tmp/tb3_sim2real.docker.xauth` was `drw-r--r-- root:root`. `x11-auth.sh` had
+not been run for this X session, so when `docker compose` went to bind-mount
+that path it did what Docker always does with a missing bind-mount source: it
+created a root-owned directory there. `XAUTHORITY` inside the container then
+pointed at a directory, no cookie was ever presented, and Kit went windowless.
+Timestamps confirmed the order — directory created 18:32:45Z, container started
+18:33:20Z. Remedy is `docker stop`, `sudo rm -rf` the directory, re-run
+`x11-auth.sh`, restart.
+
+**Concept — the documented ordering was load-bearing and nothing enforced it.**
+"Run this once per X session *before* `docker compose up/run`" was written in
+three places and was still only a comment. Skipping it does not fail loudly; it
+silently manufactures the exact condition that breaks the GUI, and it is
+self-perpetuating, because re-running the script afterwards cannot overwrite a
+root-owned directory — `touch` just fails. `x11-auth.sh` now refuses to run
+when the path is a directory (or an unwritable file) and prints the four-command
+recovery, so the trap explains itself instead of surfacing as a windowless run
+half an hour later.
+
+**Concept — re-keying gives the cookie a new inode.** `xauth nmerge` writes a
+temp file and renames it into place. A container already running keeps the old
+inode through its bind mount, so a re-key never reaches it. Restarting the
+container is part of the fix, not cleanup; the success message says so now.
+
+**Concept — Kit's healthcheck cannot see this class of failure.** It greps the
+log for `AppReady`, which appears whether or not a window was created, and the
+X auth failures are logged as *warnings*. So `docker ps` says healthy and the
+ROS topics all work — every signal short of looking at your screen says fine.
+Both known causes of a windowless Kit (wrong cookie path for uid 1234, and now
+a directory in place of the cookie) present identically, which is why the log
+grep for `GLFW initialization failed` is the diagnostic that matters.

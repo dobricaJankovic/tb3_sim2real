@@ -51,6 +51,25 @@
   `AppReady`. Symptom: "the container is up but no Isaac Sim window appeared."
   Check `/isaac-sim/.nvidia-omniverse/logs/Kit/*/*/kit_*.log` for the GLFW
   lines to confirm.
+- **Starting a container before `x11-auth.sh` turns the cookie into a
+  directory.** Same windowless symptom as above, different cause, and the one
+  you actually hit in practice — the ordering in the compose header is
+  load-bearing. Both services bind-mount the cookie path, and Docker's
+  behaviour for a bind-mount source that does not exist is to create it as a
+  **root-owned directory**. `XAUTHORITY` then points at a directory, no cookie
+  is presented, and Kit runs windowless while reporting healthy. Re-running
+  `x11-auth.sh` afterwards does not recover it — the script cannot overwrite a
+  root-owned directory — so it now detects this and prints the fix instead of
+  failing on `touch`:
+
+      docker stop isaacsim
+      sudo rm -rf /tmp/tb3_sim2real.docker.xauth
+      ./docker/x11-auth.sh
+      docker compose run --rm isaacsim
+
+  The restart at the end is required, not tidiness: `xauth nmerge` writes a
+  temp file and renames it into place, so re-keying gives the path a new inode
+  and a container already running keeps the old one through its bind mount.
 - **No GPU in `tb3_ros`.** Without a `deploy.resources.reservations.devices:
   [gpu]` block (compose has it now), `gzserver`/`gzclient` silently fall back
   to `nouveau` and die with `libGL error: failed to load driver: nouveau`.
