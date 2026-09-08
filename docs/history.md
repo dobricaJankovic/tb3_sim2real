@@ -464,3 +464,92 @@ GUI actually appear" needed a small XWD->PNG parser plus an EWMH
 Without raising, `xwd -id` on an occluded window captures whatever is drawn on
 that screen region — the first "RViz" capture was Gazebo's viewport. Both live
 in the session scratchpad, not the repo; rebuild them if this comes up again.
+
+## 2026-09-08 (later) — The TurtleBot3 would not sit still: a restitution-0.8 floor
+
+**Problem — the robot bounced and rocked on its caster with nothing driving
+it.** Reported from the GUI, reproduced headless on the bare ground plane with
+no ROS graph, no lidar and no `/cmd_vel` at all: 3.58 deg peak-to-peak in
+pitch, pitch rate to +/-0.7 rad/s, and 7.7 mm of drift in seven seconds. Not a
+tuning problem — two defaults nobody chose, stacked:
+
+1. `isaacsim.core.api.objects.GroundPlane` authors *its own* physics material
+   at **restitution 0.8** when it is not handed one. It is right there in the
+   source, in a branch commented "set default values if no physics material
+   given" (0.5 / 0.5 / **0.8**).
+2. The URDF importer binds **no** physics material to any collider, because the
+   URDF has nothing to say about friction or restitution. So every surface on
+   the robot came up on PhysX's fallback.
+
+PhysX combines restitution as an *average* by default, so every contact under
+the robot was a 0.4 — a bouncy-ball floor under a 0.94 kg robot.
+
+**Concept — why it hits a burger so much harder than it should.** The caster is
+not decoration and it never leaves the ground. The imported base has its centre
+of mass 4.3 mm *behind* the wheel axle, while `caster_back_link`'s 30 x 9 x 20
+mm skid clears the floor by 0.5 mm (skid centre 5 mm up, half-height 4.5 mm
+after the URDF's -90 deg roll). The chassis therefore tips back onto that skid
+and rests there permanently, exactly as the real robot does. A permanently
+loaded elastic contact under a rear skid is a rocking chair. The measured rest
+pitch after the fix, -0.299 deg, matches the geometry: atan(0.5 / 81) = 0.354
+deg, less contact penetration.
+
+**Fix.** `import_tb3.py` now authors three physics materials and binds them for
+the *physics* purpose (`material:binding:physics` — a plain `Bind()` writes the
+render binding, which PhysX never reads, and nothing reports it):
+
+- `floor`, mu 1.0, handed to `GroundPlane` so the 0.8 is never authored. Bound
+  on the `/World/GroundPlane` prim as well, because `GroundPlane` binds what it
+  is given only to its mesh collider and leaves the `collisionPlane` beside it
+  on the fallback.
+- `wheel`, mu 1.0, on both wheel colliders. turtlebot3_gazebo's `model.sdf`
+  gives the tyres `mu = mu2 = 100000` — "must not slip", with upstream's own
+  comment that the number is not real data. PhysX takes a coefficient, so 1.0
+  is the honest spelling of the same intent.
+- `chassis`, mu 0.1 with `frictionCombineMode = min`, bound on the articulation
+  root so everything `merge_fixed_joints` folded into it inherits: the caster
+  skid, the body box, the lidar cylinder. A high-friction skid fights the
+  wheels on every in-place turn. (Gazebo dodges the question by making
+  `caster_back_joint` a *ball* joint, so its caster rolls where ours slides.)
+
+Restitution is 0 on all three, with `restitutionCombineMode = min` rather than
+the default average, so "does not bounce" holds against whatever the other
+collider brings instead of being averaged back up by it — which is precisely
+how the ground plane's 0.8 reached the wheels. That also covers the world's
+walls and pillars, which carry no material of their own.
+
+**Verified.** Same headless measurement on the regenerated stage: pitch
+peak-to-peak **0.000 deg**, z **0.000 mm**, horizontal drift **0.00 mm** over
+seven seconds. It settles at -0.299 deg nose-up on the skid and freezes. Nothing
+else was needed — scene stabilization, contact/rest offsets and solver
+iteration counts were all measured as candidates and none of them was the cause
+(the articulation defaults are already 32 position / 1 velocity iterations).
+
+**Problem — a crash in `tb3_sim.py` looked exactly like a clean exit.** Found
+while chasing the above. `main()` ran under `try/finally: os._exit(0)`, and
+`os._exit` ends the process before Python reports the exception: a missing
+stage, a bad prim path or a failed precondition printed nothing and exited 0.
+The traceback is now printed explicitly and the status is 1. This mattered
+immediately, because the new `check_surfaces()` guard — which refuses to start
+on a stage whose colliders have no surface properties, since a stale
+`tb3_world.usd` otherwise reads as a physics-tuning problem — would itself have
+failed silently.
+
+**Problem — re-importing left the old asset behind.** The URDF importer does
+not overwrite: handed an existing `turtlebot3_burger.usd/` it writes
+`turtlebot3_burger_1/` *inside* it and returns that, leaving the previous copy.
+Every re-import kept working, so nothing pointed at the growing pile, and only
+the printed `Robot asset:` line said which copy the new `tb3_world.usd`
+referenced. `import_robot()` now clears the directory first.
+
+**Concept — two Isaac Sim containers left over from a `timeout`-killed run make
+everything look like a hang.** `timeout N docker compose run ...` kills the
+compose *client*; the container keeps running and keeps the GPU. Two of them
+accumulated during the sweep above and a normal 90-second startup stretched
+past six minutes, which read as a deadlock in the code being tested. Check
+`docker ps` before believing a Kit hang.
+
+**Verified through ROS as well.** `tb3_sim.py` in `turtlebot3_world`, no Nav2,
+no teleop, nothing publishing `/cmd_vel`: `/odom` position moved 3.4e-11 m over
+ten seconds, and `/odom` twist sat at ~1e-5 m/s and ~1e-3 rad/s — numerical
+noise. `check_surfaces()` passed on the regenerated stage without comment.

@@ -130,6 +130,37 @@
   naming the parent silently fails the same way. Verify with
   `isaac/scripts/verify_asset.py`, which bounds the robot subtree specifically;
   checking the whole stage is not enough, because a ground plane alone clears it.
+- **The robot bounces and rocks in place with nothing commanding it.** Nothing
+  errors, every topic is healthy, and the robot slowly wanders off its spawn.
+  Two defaults nobody chose:
+  `isaacsim.core.api.objects.GroundPlane` gives itself a physics material at
+  **restitution 0.8** when it is not handed one, and the URDF importer binds no
+  physics material to any collider, so every surface on the robot falls back to
+  PhysX's. Restitution combines as an *average* by default, so each contact
+  under the robot came out at 0.4 — a bouncy-ball floor under 0.94 kg.
+  It bites a TurtleBot3 especially hard because the burger's centre of mass sits
+  4.3 mm *behind* the wheel axle while the caster skid (`caster_back_link`)
+  clears the floor by 0.5 mm: the chassis permanently rests on that skid, so
+  there is always a loaded elastic contact to pump. Measured on the bare ground
+  plane with no `/cmd_vel` at all: 3.58 deg peak-to-peak in pitch, pitch rate to
+  +/-0.7 rad/s, 7.7 mm of drift in 7 s. With materials bound
+  (`import_tb3.py`'s `bind_robot_surfaces()`) the identical run reads 0.000 deg
+  and 0.00 mm — it settles 0.3 deg nose-up on the skid and stops dead.
+  `tb3_sim.py` now refuses to start on a stage that has lost them, because the
+  symptom otherwise reads as a physics-tuning problem rather than a stale asset.
+- **A crash in `tb3_sim.py` used to look like a clean exit.** `main()` ran under
+  `try/finally: os._exit(0)`, and `os._exit` ends the process before Python gets
+  to report the exception — so a missing stage, a bad prim path or a failed
+  precondition printed *nothing* and exited 0. The traceback is now printed
+  explicitly and the status is 1. Worth remembering for any Kit script: the
+  `os._exit` that dodges the TaskGroup teardown race also eats your errors.
+- **Re-running `import_tb3.py` used to leave the old asset behind.** The
+  importer does not overwrite: handed an existing `turtlebot3_burger.usd/` it
+  writes `turtlebot3_burger_1/` *inside* it, returns that path, and leaves the
+  previous copy in place. Every re-import kept working, so nothing pointed at
+  the growing pile, and only the printed `Robot asset:` line said which copy the
+  new `tb3_world.usd` actually referenced. The script now clears the directory
+  first, so an import is an import.
 - **Files written by the isaacsim container can't be deleted from the host.**
   It runs as uid 1234, so anything it writes into `isaac/scenes/` is owned by
   1234 and `rm` fails with EACCES on the subdirectories. Remove them with a

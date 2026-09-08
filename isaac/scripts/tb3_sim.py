@@ -33,6 +33,7 @@ import argparse
 import math
 import os
 import sys
+import traceback
 
 from isaacsim import SimulationApp
 
@@ -240,6 +241,49 @@ def attach_lidar():
     return sensor
 
 
+def check_surfaces() -> None:
+    """Fail on a stage whose colliders carry no surface properties.
+
+    A tb3_world.usd generated before import_tb3.py learned to author physics
+    materials opens, plays and publishes everything correctly — the robot just
+    never settles. GroundPlane's default material is restitution 0.8 and the
+    imported colliders have no material at all, so the robot rocks on its
+    caster skid and creeps across the floor with no /cmd_vel at all. Nothing is
+    logged, which is what makes it read as a tuning problem rather than a stale
+    asset, so say so here instead.
+
+    Only the ground plane and the robot are checked. The environment's walls
+    and pillars are deliberately left bare: the robot's own materials combine
+    restitution with 'min', so a contact with an unowned surface is dead
+    whatever that surface brings.
+    """
+    from pxr import Usd, UsdPhysics, UsdShade
+
+    stage = omni.usd.get_context().get_stage()
+    bad = []
+    for root in ('/World/GroundPlane', ROBOT_PRIM):
+        for prim in Usd.PrimRange(stage.GetPrimAtPath(root)):
+            if not prim.HasAPI(UsdPhysics.CollisionAPI):
+                continue
+            material, _ = UsdShade.MaterialBindingAPI(prim).ComputeBoundMaterial(
+                'physics')
+            if not material:
+                bad.append(f'{prim.GetPath()}: no physics material bound')
+                continue
+            attr = UsdPhysics.MaterialAPI(material.GetPrim()).GetRestitutionAttr()
+            restitution = attr.Get() if attr else None
+            if restitution != 0.0:
+                bad.append(f'{prim.GetPath()}: restitution {restitution} '
+                           f'(from {material.GetPath()})')
+    if bad:
+        raise RuntimeError(
+            f'{args.stage} has bouncy or unset surfaces:\n  '
+            + '\n  '.join(bad)
+            + '\n  The robot will rock on its caster and drift with no command '
+              'given.\n  Regenerate the stage:  '
+              '/isaac-sim/python.sh /scripts/import_tb3.py --model burger')
+
+
 def set_pose(prim_path: str, xyz, yaw: float) -> None:
     """Place a prim, coping with xformOps a reference already authored.
 
@@ -330,6 +374,7 @@ def main() -> None:
     if not prim_utils.get_prim_at_path(ARTICULATION_ROOT).IsValid():
         raise RuntimeError(f'{ARTICULATION_ROOT} missing from {args.stage} — '
                            'run import_tb3.py, then verify_asset.py')
+    check_surfaces()
 
     if args.world and not args.no_world:
         load_world(args.world)
@@ -360,10 +405,21 @@ def main() -> None:
 
 
 if __name__ == '__main__':
+    # The traceback is printed HERE, not left to the interpreter: os._exit()
+    # below terminates the process immediately, before Python gets to report an
+    # exception on its way out. Without this, every failure in main() — a
+    # missing stage, a bad prim path, check_surfaces() — looked identical to a
+    # clean shutdown: no message, exit status 0. Same reason build_world_usd.py
+    # catches and prints its own.
+    status = 0
     try:
         main()
+    except BaseException:
+        traceback.print_exc()
+        status = 1
     finally:
         sys.stdout.flush()
+        sys.stderr.flush()
         # Same TaskGroup teardown race as import_tb3.py — a graceful
         # simulation_app.close() aborts the process on the way out.
-        os._exit(0)
+        os._exit(status)

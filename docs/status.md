@@ -67,6 +67,18 @@ commanded goal. See `docs/history.md` for the run's numbers.
   `build_scene.py`'s CHASSIS_PRIM/LIDAR_PRIM were corrected to match the
   actual import output (see comments there). Wheel joint drive gains
   (`override_joint_damping` in `import_tb3.py`) are an unverified placeholder.
+  Re-running it is now idempotent — the importer does not overwrite, so the
+  script clears the asset directory first.
+- **Surface properties are authored here, not inherited.** Neither the URDF nor
+  the importer supplies friction or restitution, and `GroundPlane` defaults its
+  own material to restitution 0.8, so the robot used to rock on its caster and
+  creep across the floor with nothing commanding it (3.58 deg peak-to-peak in
+  pitch, 7.7 mm drift in 7 s). `bind_robot_surfaces()` binds a floor/wheel
+  (mu 1.0) and chassis+caster (mu 0.1) material, restitution 0 throughout,
+  combined with `min` rather than the default average. The same measurement now
+  reads 0.000 deg and 0.00 mm. `tb3_sim.py`'s `check_surfaces()` refuses to
+  start on a stage that has lost them, since the symptom otherwise looks like a
+  physics-tuning problem rather than a stale asset.
 - `isaac/scripts/verify_asset.py` (new) gates the above: it composes a stage and
   fails if the robot subtree has no renderable geometry. Current output for
   `tb3_world.usd` is 4 robot meshes (burger_base 48040 pts, lds 7231, each tire
