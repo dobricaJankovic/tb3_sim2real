@@ -1,191 +1,112 @@
-# Two images, one DDS domain.
+# One image, one container, one DDS domain.
 #
-#   isaacsim  -> Ubuntu 24.04 (noble), Kit python 3.12, internal ROS 2 Humble libs.
-#                Knows nothing about ROS packages. Just publishes/subscribes.
-#   tb3_ros   -> Ubuntu 22.04 (jammy), system ROS 2 Humble, python 3.10.
-#                Nav2, RViz, Gazebo Classic, real-robot drivers, our bringup package.
+#   tb3_ros -> Ubuntu 22.04 (jammy), ROS 2 Humble, python 3.10, AND Isaac Sim 6.0
+#              at /isaac-sim. Nav2, RViz, Gazebo Classic, the real-robot drivers,
+#              our bringup package, and the simulator, all in one place.
 #
-# They only ever talk over DDS, and they need the SAME ROS_DOMAIN_ID.
+# This used to be two services that met only on the DDS wire, because a locally
+# built Isaac Sim requires GLIBC_2.38 and jammy provides 2.35. NVIDIA's released
+# build is compiled to 2.34 and runs here. See docs/architecture.md; verify.sh
+# scores the base image 5/5.
 #
-# They do NOT need a shared /dev/shm. That was the original design and this
-# comment used to say `ipc: host` was required "or discovery works and data
-# silently does not" — but docker/fastdds_udp_only.xml, added later, disables
-# Fast-DDS's shared-memory transport outright (useBuiltinTransports=false,
-# UDPv4 only) because the two containers run as different uids and Fast-DDS
-# creates its segments 0700. With SHM off on both sides, sharing /dev/shm
-# carried no data and only created collisions — see the isaacsim service.
+#   ./docker/x11-auth.sh              # once per X session
+#   scripts/build_images.sh           # base image, then this one
+#   docker compose up -d              # start it; it stays up, caches stay warm
+#   docker compose exec tb3_ros bash  # terminal 1
+#   docker compose exec tb3_ros bash  # terminal 2, and so on
 #
-# BOTH services are network_mode: host, and that has to stay symmetric. The
-# official ROS image docs warn that host networking "removes the networking
-# namespace separation between containers, and can affect the ability of DDS
-# participants to communicate between containers" — that warning is about
-# *mixing* the two. Because both sit in the host namespace they behave as one
-# machine and discovery works. Move either service onto a bridge network and
-# the pairing breaks in the usual silent way: topics discovered, no data.
+# `exec` does NOT run /entrypoint.sh -- only `run` does. An interactive shell
+# gets away with it because /root/.bashrc sources ROS 2, but Ubuntu's stock
+# root .bashrc returns early for non-interactive shells, so
 #
-#   ./docker/x11-auth.sh                 # once per X session, before either
-#   docker compose run --rm isaacsim     # the simulator; leave it running
-#   docker compose run --rm tb3_ros      # second terminal, then bringup
+#   docker compose exec tb3_ros bash -c 'ros2 topic list'
 #
-# For a bare Isaac Sim GUI with no scene (poking at stages by hand):
-#   docker compose run --rm --entrypoint /isaac-sim/runapp.sh isaacsim
+# lands in a container with no ros2 on PATH and fails quietly. For anything
+# scripted, go through the entrypoint explicitly:
+#
+#   docker compose exec tb3_ros /entrypoint.sh bash -c 'ros2 topic list'
+#
+# Inside, `isaacsim` starts the GUI and `isaacsim-python <script>` runs a
+# standalone app. Both go through ros-isolate, which is the ONLY correct way to
+# start Kit from a shell that has sourced ROS 2 -- see docker/isaacsim-ros2/ros-isolate.
 
 services:
-
-  isaacsim:
-    image: isaac-sim-docker:latest        # built from ~/isaacsim-6.0/tools/docker
-    container_name: isaacsim
-    # tb3_sim.py IS the simulator launcher — it boots Kit, opens the stage,
-    # builds the ROS 2 graph and calls play(), the way gazebo.launch.py starts
-    # gzserver/gzclient. runapp.sh (the bare GUI) only opens an empty stage and
-    # publishes nothing, so it is not the default; override the entrypoint when
-    # you actually want it.
-    entrypoint: /isaac-sim/python.sh
-    command: /scripts/tb3_sim.py
-    network_mode: host
-    # Deliberately NO `ipc: host` — this container gets its own /dev/shm.
-    #
-    # carb (Kit's core) creates a POSIX shared-memory segment named after its
-    # own PID: /dev/shm/carb-RStringInternals-<pid>. Under python.sh that PID is
-    # deterministically 62 nearly every run. With `ipc: host` that lands in the
-    # HOST's /dev/shm, which is sticky (drwxrwxrwt) and shared with every other
-    # container and with anything that ever ran Kit as root. This service runs
-    # as uid 1234 (NVIDIA's image ends `USER isaac-sim`), so a root-owned
-    # leftover at that exact name can be neither reused nor unlinked, and Kit
-    # aborts before it starts:
-    #
-    #   RStringInternals.inl:667 Assertion (false) failed:
-    #     Failed to create shared memory named carb-RStringInternals-62
-    #   terminate called without an active exception
-    #
-    # Because the name is PID-derived and the PID repeats, one stale root-owned
-    # file poisons that slot permanently — every subsequent run fails the same
-    # way. A private IPC namespace makes the collision structurally impossible.
-    #
-    # Nothing needed the shared /dev/shm: DDS is UDP-only (see the profiles file
-    # below) and MIT-SHM is off (QT_X11_NO_MITSHM=1). No shm_size override
-    # either — NVIDIA's own tools/docker/run_docker.sh passes --network=host
-    # with no --ipc and no --shm-size, so Kit is known to run on the 64 MB
-    # default.
-    environment:
-      # Which environment tb3_sim.py loads, by registry name (worlds/<name>/).
-      # This is the isaacsim counterpart of `bringup.launch.py world:=` — Isaac
-      # Sim runs in its own container, so the world is chosen here rather than
-      # by the ROS-side launch, which only attaches.
-      #   WORLD=my_office docker compose run --rm isaacsim
-      - WORLD=${WORLD:-turtlebot3_world}
-      - ACCEPT_EULA=Y
-      - PRIVACY_CONSENT=Y
-      - PRIVACY_USERID=${PRIVACY_EMAIL:-user@example.com}
-      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-30}
-      - DISPLAY=${DISPLAY}
-      - QT_X11_NO_MITSHM=1
-      # Host X access control is per-UID (`SI:localuser:<you>`), so the X11
-      # socket mount alone isn't enough — GUI opens fail auth. XAUTHORITY
-      # points at a cookie docker/x11-auth.sh generates on the host and re-keys
-      # under a wildcard family; run that script before `docker compose up/run`.
-      #
-      # NOT /root/.Xauthority (which is what tb3_ros uses): NVIDIA's Dockerfile
-      # ends with `USER isaac-sim`, so this container runs as uid 1234, not
-      # root, and cannot traverse /root. Mounting there fails silently — Kit
-      # logs "GLFW initialization failed" / "IAppWindow::startup failed" and
-      # runs on with no window, while the healthcheck still reports healthy
-      # because it only greps the log for AppReady. /tmp is chowned to
-      # isaac-sim by the image, so the cookie is readable here.
-      - XAUTHORITY=/tmp/.docker.xauth
-      # Verified against a live probe: leaving ROS_DISTRO unset does NOT make
-      # isaacsim.ros2.core fall back cleanly — it logs "ROS2 Bridge startup
-      # failed" (librmw_implementation.so -> missing libament_index_cpp.so)
-      # and the bridge silently never talks DDS. Its own error message names
-      # this exact fix. The variable SELECTS a bundle, it does not rescue one:
-      # the extension defaults to `ros_distro = "system_default"`, i.e. it reads
-      # ROS_DISTRO and picks a directory under exts/isaacsim.ros2.core/, and
-      # unset it resolves nothing.
-      #
-      # NOT "the bundled distro is Jazzy, not Humble" (what this said before) —
-      # the image ships BOTH humble/ and jazzy/, and with LD_LIBRARY_PATH aimed
-      # at either, every dependency of librmw_fastrtps_cpp.so resolves. Humble
-      # would likely work. Jazzy is chosen because this image is Ubuntu 24.04
-      # (noble) and Jazzy is noble's distro, so it matches the container's own
-      # libraries. Mixing with tb3_ros's Humble is fine: FastDDS is wire
-      # compatible, the message types we use are unchanged between the two, and
-      # tb3_ros already defaults to rmw_fastrtps_cpp. The cost is that Jazzy's
-      # discovery type hashes mean nothing to Humble, so a genuinely divergent
-      # message definition would surface as garbage, not as an error.
-      - ROS_DISTRO=jazzy
-      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
-      - LD_LIBRARY_PATH=/isaac-sim/exts/isaacsim.ros2.core/jazzy/lib
-      # This container is uid 1234 and tb3_ros is root, so Fast-DDS's 0700
-      # shared-memory segments are mutually unreadable and the data path dies
-      # silently while discovery keeps working. See the XML for the full story.
-      - FASTRTPS_DEFAULT_PROFILES_FILE=/etc/fastdds_udp_only.xml
-    volumes:
-      - ./docker/fastdds_udp_only.xml:/etc/fastdds_udp_only.xml:ro
-      - /tmp/.X11-unix:/tmp/.X11-unix:rw
-      - ${TB3_XAUTH:-/tmp/tb3_sim2real.docker.xauth}:/tmp/.docker.xauth:ro
-      - ./isaac/scenes:/scenes   # rw: the URDF importer writes the asset and world stage here
-      - ./isaac/scripts:/scripts:ro
-      # The world registry, mounted at the SAME path in both services so
-      # tb3_bringup.worlds and tb3_sim.py resolve identically. rw because
-      # build_world_usd.py writes <name>.usd back beside the manifest.
-      - ./worlds:/worlds
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - capabilities: [gpu]
-    stdin_open: true
-    tty: true
 
   tb3_ros:
     build:
       context: ./docker/ros
       dockerfile: Dockerfile
-    image: tb3_sim2real/ros:humble
-    # no container_name: we mostly `docker compose run --rm tb3_ros`, which
-    # ignores it and warns. Use `docker compose exec` against `up -d` if you
-    # want a stable name.
+      args:
+        # Built by scripts/build_images.sh from docker/isaacsim-ros2/Dockerfile.humble.
+        BASE_IMAGE: ${TB3_BASE_IMAGE:-isaacsim6-humble:ngc}
+    image: tb3_sim2real/tb3_ros:humble
+    container_name: tb3_ros
     network_mode: host
-    ipc: host
     privileged: true                      # /dev/ttyACM0 + lidar USB for the real robot
+
+    # Deliberately NO `ipc: host`. carb (Kit's core) creates a POSIX shared
+    # memory segment named after its own PID -- /dev/shm/carb-RStringInternals-<pid>
+    # -- and that PID is deterministic across runs. With `ipc: host` it lands in
+    # the HOST's sticky /dev/shm, where one stale root-owned file poisons that
+    # exact name permanently and Kit aborts before it starts:
+    #
+    #   RStringInternals.inl:667 Assertion (false) failed:
+    #     Failed to create shared memory named carb-RStringInternals-62
+    #
+    # A private IPC namespace makes the collision structurally impossible. This
+    # was never about DDS, and merging the containers does not change it.
+
     environment:
+      # Which environment tb3_sim.py loads, by registry name (worlds/<name>/).
+      - WORLD=${WORLD:-turtlebot3_world}
+      - ACCEPT_EULA=Y
+      - PRIVACY_CONSENT=Y
+      - PRIVACY_USERID=${PRIVACY_EMAIL:-user@example.com}
       - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-30}
       - TURTLEBOT3_MODEL=${TURTLEBOT3_MODEL:-burger}
       - LDS_MODEL=${LDS_MODEL:-LDS-02}
-      # ros-humble-turtlebot3-gazebo ships no Gazebo-specific ament hook (only
-      # the usual path.dsv/ament_prefix_path.dsv), so gzserver can't resolve
-      # <uri>model://turtlebot3_world without this — a standard TurtleBot3
-      # e-manual .bashrc step, needed here since the container has no .bashrc.
-      # Prepended, not a replacement: it must stay alongside Gazebo's own
-      # default /usr/share/gazebo-11/models, which is where model://ground_plane
-      # and model://sun live. Setting this var wipes that default out, and with
-      # GAZEBO_MODEL_DATABASE_URI emptied below there's no fallback fetch left
-      # either — the robot spawns into a world with no ground plane and falls
-      # through forever.
-      #
-      # /worlds is prepended so the registry's generated worlds can reference
-      # their own shared meshes as model://<name>/meshes/..., which is what
-      # keeps the generated .world free of absolute container paths. Gazebo
-      # picks a directory up as a model only if it contains model.config, which
-      # build_world.py generates alongside the .world.
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+
+      # ROS_DISTRO and the bundled-library path are NOT set here any more. The
+      # old isaacsim service had to pin ROS_DISTRO=jazzy and point
+      # LD_LIBRARY_PATH at exts/isaacsim.ros2.core/jazzy/lib by hand. ros-isolate
+      # now derives both from ISAACSIM_ROS_DISTRO=humble, baked into the base
+      # image, and only for the Kit process -- so the shell keeps the system
+      # Humble and Kit gets its own. Setting ROS_DISTRO here would break the
+      # shell's ROS 2.
+
+      # ros-humble-turtlebot3-gazebo ships no Gazebo-specific ament hook, so
+      # gzserver cannot resolve <uri>model://turtlebot3_world without this.
+      # Prepended, not a replacement: /usr/share/gazebo-11/models is where
+      # model://ground_plane and model://sun live, and wiping it out drops the
+      # robot through a world with no ground plane. /worlds is first so the
+      # registry's generated worlds resolve their own meshes as
+      # model://<name>/meshes/... and stay free of absolute container paths.
       - GAZEBO_MODEL_PATH=/worlds:/opt/ros/humble/share/turtlebot3_gazebo/models:/usr/share/gazebo-11/models
-      # gzserver's ModelDatabase does a synchronous fetch from
-      # models.gazebosim.org on startup to refresh its local model cache
-      # metadata, independent of GAZEBO_MODEL_PATH above. In this network it
-      # hangs rather than failing fast, so /spawn_entity never comes up.
-      # Emptying the URI skips it; models already resolve fine locally.
+      # gzserver's ModelDatabase does a synchronous fetch from models.gazebosim.org
+      # on startup, independent of GAZEBO_MODEL_PATH. In this network it hangs
+      # rather than failing fast and /spawn_entity never comes up. Emptying the
+      # URI skips it; models already resolve locally.
       - GAZEBO_MODEL_DATABASE_URI=
+
       - DISPLAY=${DISPLAY}
       - QT_X11_NO_MITSHM=1
-      # Same per-UID X access control issue and same docker/x11-auth.sh fix as
-      # the isaacsim service above, but this image does run as root, so /root
-      # is a fine place for the cookie. That is the only reason the two
-      # services mount it at different paths.
+      # Host X access control is per-UID (`SI:localuser:<you>`), so the socket
+      # mount alone is not enough. docker/x11-auth.sh generates a cookie on the
+      # host and re-keys it under a wildcard family; run it before `up`.
+      #
+      # ONE path now, not two. The split existed only because NVIDIA's image ends
+      # `USER isaac-sim` (uid 1234) and could not traverse /root, while this image
+      # runs as root. One image, one uid, one cookie.
       - XAUTHORITY=/root/.Xauthority
-      # Must match the isaacsim service — see that service's comment and
-      # docker/fastdds_udp_only.xml.
-      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+
+      # Still here, still UDP-only, and now probably unnecessary: Fast-DDS
+      # creates its shared-memory segments 0700, which the old 1234-vs-root split
+      # made mutually unreadable, so discovery worked and data silently did not.
+      # With one uid that reason is gone. Removing it is its own change, with its
+      # own test -- see docs/history.md.
       - FASTRTPS_DEFAULT_PROFILES_FILE=/etc/fastdds_udp_only.xml
+
     volumes:
       - ./docker/fastdds_udp_only.xml:/etc/fastdds_udp_only.xml:ro
       - /dev:/dev
@@ -193,32 +114,62 @@ services:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - ${TB3_XAUTH:-/tmp/tb3_sim2real.docker.xauth}:/root/.Xauthority:ro
       - ./tb3_bringup:/ws/src/tb3_bringup   # edit on host, colcon build inside
-      # Same registry the isaacsim service mounts, same path. Read-only here:
-      # only the Isaac side generates into it.
-      - ./worlds:/worlds:ro
-      # ROS writes its logs to ~/.ros, which is /root/.ros for this image. We
-      # mostly `run --rm`, so without this every log is destroyed on exit — and
-      # the failures here are usually the silent kind you can only diagnose
-      # afterwards.
+      - ./isaac/scenes:/scenes              # rw: the URDF importer writes here
+      - ./isaac/scripts:/scripts:ro
+      # rw, unlike the old tb3_ros mount: the Isaac side generates <name>.usd
+      # back beside the manifest, and that side now lives in this container.
+      - ./worlds:/worlds
+
+      # --- Kit caches ---------------------------------------------------------
+      # Measured on 2026-09-13 by diffing the filesystem across a cold
+      # tb3_sim.py run, not copied from NVIDIA's compose file -- theirs mounts
+      # four $HOME-relative paths, which is right for an image whose user's home
+      # IS /isaac-sim and wrong here, where HOME=/root. The big one is not
+      # $HOME-relative at all:
       #
-      # A named volume rather than a bind mount, deliberately: this container
-      # runs as root, so a bind mount would create a root:root directory inside
-      # the repo that you cannot delete without sudo. Read the logs with
-      #   docker compose run --rm tb3_ros ls /root/.ros/log
-      # and discard them with
+      #   493 MB  /isaac-sim/kit/cache        shader cache
+      #   6.3 MB  /root/.nv/ComputeCache      CUDA
+      #   1.4 MB  /var/tmp/OptixCache_root    OptiX, i.e. the RTX lidar
+      #
+      # Measured effect: /scan appears 164-168 s after launch cold (three runs)
+      # and 14 s warm (two runs). That 12x is the entire argument for this
+      # block. Note it belongs to the VOLUMES, not to `up -d` -- `docker compose
+      # run --rm` gets the same warm cache, and also keeps the entrypoint, which
+      # `exec` does not.
+      # The ~46 MB of .pyc Kit scatters through /isaac-sim is deliberately NOT
+      # persisted: regenerating it is seconds of CPU, and covering it would mean
+      # volume-mounting the whole 25 GB install tree.
+      - isaac_kit_cache:/isaac-sim/kit/cache
+      - isaac_compute_cache:/root/.nv/ComputeCache
+      - isaac_optix_cache:/var/tmp
+      # Kit's own logs, for the same reason ros_logs exists: the failures here
+      # are usually the silent kind you can only diagnose afterwards.
+      - isaac_kit_logs:/isaac-sim/kit/logs
+
+      # ROS logs. A named volume rather than a bind mount, deliberately: this
+      # container runs as root, so a bind mount would create a root:root
+      # directory inside the repo that you cannot delete without sudo.
+      #   docker compose exec tb3_ros ls /root/.ros/log
       #   docker volume rm tb3_sim2real_ros_logs
       - ros_logs:/root/.ros
+
     working_dir: /ws
-    command: bash
+    command: sleep infinity      # `up -d` keeps it alive; attach with `exec`
+    # `sleep infinity` as PID 1 does not reap children, and Kit leaves plenty:
+    # a killed simulator left a trail of `python3 <defunct>` behind on the first
+    # run of this file. init: true puts docker-init in front so they get reaped.
+    init: true
     stdin_open: true
     tty: true
     deploy:
       resources:
         reservations:
           devices:
-            - capabilities: [gpu]         # gzserver/gzclient GLX rendering needs the real driver,
-                                           # not the nouveau fallback picked up without this
+            - capabilities: [gpu]
 
 volumes:
-  # ROS log directory for tb3_ros; see that service's volumes entry.
   ros_logs:
+  isaac_kit_cache:
+  isaac_compute_cache:
+  isaac_optix_cache:
+  isaac_kit_logs:

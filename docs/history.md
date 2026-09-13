@@ -649,3 +649,48 @@ start, cold — the third measurement in a row pointing at cache volumes. And
 `/clock` advances at ~38 Hz against a 1/60 s physics step, so the sim runs at
 roughly 0.6x real time on this box with the lidar on. That is a Nav2 tuning
 input, not a fault, and `use_sim_time` already covers correctness.
+
+## 2026-09-13 (later still) — the merge, and two traps in a persistent container
+
+`docker-compose.yml` is one service now. `docker/ros/Dockerfile` is `FROM`
+`isaacsim6-humble:ngc` and installs only what the base lacks — audited against
+the built image, which turned out to be four things: `joint_state_publisher`,
+`cartographer`, `cartographer_ros`, and the TurtleBot3 set. The old
+rviz2-instead-of-desktop trick went with it; ~466 MB of tutorials mattered
+against a 5 GB image and does not against a 38 GB one.
+
+**Cache paths are not where NVIDIA's compose file says.** Theirs mounts four
+`$HOME`-relative paths, correct for an image whose user's home *is* `/isaac-sim`
+and wrong here, where `HOME=/root`. Measured by diffing the filesystem across a
+cold run:
+
+    493 MB  /isaac-sim/kit/cache       shader cache -- NOT $HOME-relative
+    6.3 MB  /root/.nv/ComputeCache     CUDA
+    1.4 MB  /var/tmp/OptixCache_root   OptiX, i.e. the RTX lidar
+
+A first attempt at this scan excluded `/tmp` and reported 12 MB of `.pyc` and
+nothing else, which looked like evidence that there was no cache worth keeping.
+The exclusion was the bug.
+
+**Effect: `/scan` 164-168 s cold, 14 s warm.** Twelve times, and it belongs to
+the volumes rather than to `up -d` — `docker compose run --rm` gets the same
+warm cache.
+
+**Trap 1 — `docker compose exec` does not run the entrypoint.** Only `run`
+does. An interactive shell survives because `/root/.bashrc` sources ROS 2, but
+Ubuntu's stock root `.bashrc` returns early when non-interactive, so
+`exec tb3_ros bash -c 'ros2 ...'` gets a container with no `ros2` on `PATH` and
+fails silently. This cost a whole measurement: two runs reported `elapsed=300s`,
+which was not a slow start but the poll loop timing out because every
+`ros2 topic list` had failed into `/dev/null`. Scripted use goes through
+`docker compose exec tb3_ros /entrypoint.sh <cmd>`. The old `run --rm` workflow
+never had this problem, and losing it is a real cost of the persistent
+container.
+
+**Trap 2 — `sleep infinity` as PID 1 reaps nothing.** Killed simulators left a
+trail of `python3 <defunct>`. `init: true` puts docker-init in front. Both
+verified: `/proc/1/comm` is `docker-init`, and the entrypoint form works.
+
+**Aside, for whoever writes the next test script.** `pkill -9 -f "isaac-sim"`
+matches the shell running it, because the pattern is in its own command line.
+It kills itself, the step produces no output, and the exec exits 137.

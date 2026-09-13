@@ -1,11 +1,12 @@
 # Architecture
 
-Two containers, one DDS domain. **`isaacsim`** (Ubuntu 24.04, Kit Python 3.12)
-runs the simulator using the ROS 2 Humble libraries bundled inside
-`isaacsim.ros2.core` — no ROS installed, no ROS packages, no launch files.
-**`tb3_ros`** (Ubuntu 22.04, system Humble, Python 3.10) runs everything that is
-ROS: Nav2, RViz, `robot_state_publisher`, Gazebo, the real-robot drivers, and
-this package. They only ever meet on the DDS wire.
+One container. **`tb3_ros`** (Ubuntu 22.04, system Humble, Python 3.10) runs
+everything that is ROS — Nav2, RViz, `robot_state_publisher`, Gazebo, the
+real-robot drivers, this package — *and* Isaac Sim 6.0 at `/isaac-sim`, which
+Kit runs on its own bundled Python 3.12. The two interpreters never meet;
+`ros-isolate` keeps the system installation out of Kit's search paths, and the
+simulator reaches the rest of the system over DDS exactly as it did when it was
+a separate container.
 
 **The Python 3.10 / 3.12 split is not a problem.** Not because ROS 2 Python
 stays out of Kit — it does not. `isaacsim.ros2.core` loads an `rclpy` during
@@ -98,8 +99,10 @@ true.
 ## Layout
 
 ```
-docker/ros/            the tb3_ros image (Humble + Nav2 + Gazebo + TB3)
-docker-compose.yml     both services, network_mode+ipc host, shared ROS_DOMAIN_ID
+docker/isaacsim-ros2/  Isaac Sim 6.0 + ROS 2 Humble, generic; verify.sh scores it
+docker/ros/            + TurtleBot3, drivers, worlds, workspace -> tb3_ros
+scripts/build_images.sh  builds the two in order (the second is FROM the first)
+docker-compose.yml     one service, network_mode host, private IPC, cache volumes
 isaac/scenes/          TB3 USD stages (gitignored — decide on LFS later)
 isaac/scripts/         tb3_sim.py — the simulator launcher: stage + graph + play()
 scripts/               one-off host/container helpers
