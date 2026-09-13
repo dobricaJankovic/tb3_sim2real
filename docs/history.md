@@ -742,3 +742,48 @@ noticed, which is exactly the kind of thing that makes a later measurement
 lie. Without a TTY there is no signal forwarding, so scripted runs must clean
 up inside the container: `docker compose exec -T tb3_ros pkill -INT -f
 "ros2 launch"`.
+
+---
+
+## 2026-09-13 — shared-memory DDS back on, and `/dev/shm` was never private
+
+**Change:** removed `FASTRTPS_DEFAULT_PROFILES_FILE` and the
+`docker/fastdds_udp_only.xml` mount from `docker-compose.yml`, and deleted the
+file. Fast-DDS is on its default transports again, shared memory included.
+
+**Why it was safe:** UDP-only existed because two containers ran as different
+uids (1234 and root) and could not open each other's `/dev/shm` segments —
+discovery worked over UDP multicast and the data path silently did not. One
+image means one uid, so the failure has no way to occur.
+
+**Result:** nothing changed except that the segments exist.
+`/dev/shm/fastrtps_<hash>` appears at 537 KB, and the rates are identical to
+the UDP-only run: `/clock` 60 Hz, `/odom` 60 Hz, `/joint_states` 60 Hz, `/scan`
+10 Hz, with `ros2 topic echo /scan` returning a real `ranges` array, AMCL
+localising, and `/cmd_vel` moving the robot 0.35 m. At a 360-point scan there
+was never any throughput at stake; the point was to delete a workaround whose
+reason had expired, and to find out whether anything else had quietly come to
+depend on it. Nothing had.
+
+**The finding that matters more than the change.** `docker-compose.yml` claimed
+that dropping `ipc: host` gave the container a private `/dev/shm` and made the
+`carb-RStringInternals-<pid>` collision "structurally impossible". It does not,
+because `- /dev:/dev` is a *recursive* bind mount of the host's `/dev`, and it
+covers whatever `/dev/shm` Docker prepared. Measured both ways: 110 identical
+entries and the same `df` on both sides, and a file touched at `/dev/shm/x`
+inside the container appears at `/dev/shm/x` on the host, owned by root.
+
+So every Kit run has been writing into the host's `/dev/shm` all along — today's
+runs left 19 root-owned `carb-RStringInternals-*` files there. The reason this
+is not fatal is the uid, not the namespace: as root, Kit creates those files
+`0666` and can reuse or unlink its own leftovers. The two-container era was
+fatal because uid 1234 met a root-owned leftover. Comments corrected in
+`docker-compose.yml` and `docs/troubleshooting.md` rather than changing the
+`/dev` mount, which the real robot's USB devices need.
+
+**Also:** `docker compose up -d` recreating the container destroys
+`/ws/install` — it is in the container's writable layer, not a volume — so the
+first `ros2 launch tb3_bringup` after any recreate fails with
+`Package 'tb3_bringup' not found`. `colcon build` is 1.5 s here, so this is a
+papercut rather than a problem, but it is a live input to the open item 5:
+`docker compose run --rm` would hit it on *every* run.

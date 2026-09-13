@@ -3,24 +3,23 @@
 - **`ROS_DOMAIN_ID` mismatch.** The stock TurtleBot3 image hardcodes `30` in
   `.bashrc`; Isaac Sim defaults to `0`. Different domains = total silence, no
   error. Set it explicitly for both services (compose does).
-- **Separate `/dev/shm`.** Discovery succeeds over UDP, then Fast-DDS negotiates
-  shared memory for the data path and nothing arrives. `ipc: host` on both.
 - **Fast-DDS shared memory across containers running as different uids.**
-  This bit us for real, and `ipc: host` was set correctly the whole time —
-  `/dev/shm` genuinely was shared. The problem is that isaacsim runs as uid 1234
-  (NVIDIA's image ends with `USER isaac-sim`) while tb3_ros runs as root, and
-  Fast-DDS creates its `/dev/shm` segments with mode **0700**, so neither
-  participant can open the other's. The symptom is maximally deceptive:
-  discovery rides UDP multicast, so `ros2 topic list` from `tb3_ros` shows
-  every Isaac Sim topic and `ros2 topic info --verbose` reports a healthy
-  `RELIABLE` publisher with a real GID — but `ros2 topic echo` hangs forever
-  and `ros2 topic hz` reports nothing. Everything looks connected; zero bytes
-  move. Fixed by forcing UDP-only on both services via
-  `docker/fastdds_udp_only.xml` + `FASTRTPS_DEFAULT_PROFILES_FILE` (compose
-  sets both). Quick confirmation that you are looking at this and not something
-  else: re-run the failing `ros2 topic echo` with
-  `FASTRTPS_DEFAULT_PROFILES_FILE` pointed at that XML — if data appears
-  instantly, it was SHM.
+  *Historical — it cannot happen in the single-container layout, and the
+  UDP-only workaround was removed on 2026-09-13. Keep reading only if you have
+  a second container on the domain.* Two containers, `ipc: host` set correctly
+  on both, `/dev/shm` genuinely shared — and still nothing arrived, because
+  isaacsim ran as uid 1234 (NVIDIA's image ends with `USER isaac-sim`) while
+  tb3_ros runs as root, and Fast-DDS's `/dev/shm` segments are not readable
+  across uids. The symptom is maximally deceptive: discovery rides UDP
+  multicast, so `ros2 topic list` shows every Isaac Sim topic and
+  `ros2 topic info --verbose` reports a healthy `RELIABLE` publisher with a
+  real GID — but `ros2 topic echo` hangs forever and `ros2 topic hz` reports
+  nothing. Everything looks connected; zero bytes move. The fix was
+  `docker/fastdds_udp_only.xml` + `FASTRTPS_DEFAULT_PROFILES_FILE`; recover it
+  from git history if a second uid ever comes back. Quick confirmation that you
+  are looking at this and not something else: re-run the failing
+  `ros2 topic echo` with `FASTRTPS_DEFAULT_PROFILES_FILE` pointed at that XML —
+  if data appears instantly, it was SHM.
 - **Isaac Sim publishes nothing until you press Play.** OmniGraph nodes are
   inert when stopped, which looks exactly like a broken DDS setup.
   `wait_for_sim` exists to make this legible in the log.
@@ -181,9 +180,15 @@
   Because the name is PID-derived and the PID repeats, one stale file poisons
   that slot *permanently*: every later run fails identically, which is what
   makes it look like a broken image rather than stale state.
-  Fixed structurally by dropping `ipc: host` (see `docker-compose.yml`) so the
-  container gets a private `/dev/shm`. Nothing needed the shared one — DDS is
-  UDP-only per `docker/fastdds_udp_only.xml` and MIT-SHM is off.
+  What actually fixed it is that the container runs as **root**: Kit creates
+  those files `0666`, so a leftover from an earlier *root* run can be reused or
+  unlinked, and only a leftover owned by somebody else is fatal. Dropping
+  `ipc: host` was believed to be the structural fix and is not one — measured
+  2026-09-13, the container's `/dev/shm` is still the host's, because
+  `- /dev:/dev` in `docker-compose.yml` recursively bind-mounts the host `/dev`
+  over whatever private `/dev/shm` Docker set up. A file created at
+  `/dev/shm/x` inside the container is visible at `/dev/shm/x` on the host, and
+  root-owned there. If you do hit a poisoned name, clear it as shown below.
   If you meet this on an older checkout, clear the stale segments with
   `sudo rm -f /dev/shm/carb-RStringInternals-* /dev/shm/sem.carb-RStringInternals-*`
   while no Kit process is running.

@@ -181,12 +181,26 @@ backends — that is AMCL's normal behaviour (`set_initial_pose` is false), not 
 merge symptom. Publishing `/initialpose` once at the spawn pose localised it to
 `[-1.95, -0.48]`.
 
+4. **Shared-memory DDS is back on.** `PASS`.
+   `FASTRTPS_DEFAULT_PROFILES_FILE` and the `docker/fastdds_udp_only.xml` mount
+   are gone and the file is deleted (git history has it, should a second uid
+   ever return). Fast-DDS creates its segments again —
+   `/dev/shm/fastrtps_<hash>`, 537 KB — and every rate is unchanged from the
+   UDP-only run: `/clock` 60 Hz, `/odom` 60 Hz, `/joint_states` 60 Hz, `/scan`
+   10 Hz, plus a real `ranges` array out of `ros2 topic echo`, AMCL localising,
+   and `/cmd_vel` driving the robot 0.35 m.
+
+   Found on the way: **the container's `/dev/shm` is the host's**, not a
+   private one. `- /dev:/dev` bind-mounts the host `/dev` over whatever Docker
+   set up, so dropping `ipc: host` never gave this container a private
+   `/dev/shm` — verified by touching a file inside and seeing it on the host.
+   The carb-segment collision is harmless anyway now, for a different reason
+   than the comments claimed: root creates those files `0666` and can reuse
+   them. Comments in `docker-compose.yml` and `docs/troubleshooting.md`
+   corrected.
+
 ### Still to check
 
-4. **Shared-memory DDS.** Drop `FASTRTPS_DEFAULT_PROFILES_FILE` and the
-   `docker/fastdds_udp_only.xml` mount and confirm data still flows. The reason
-   for UDP-only — Fast-DDS's 0700 segments across uid 1234 and root — is gone
-   with the merge. Its own commit, so a failure is unambiguous.
 5. **Decide `exec` vs `run --rm` as the documented path.** The warm cache lives
    in named volumes, so `docker compose run --rm tb3_ros` gets the same 14 s
    start *and* runs the entrypoint, avoiding the silent-failure trap where

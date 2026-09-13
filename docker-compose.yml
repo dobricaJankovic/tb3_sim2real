@@ -46,15 +46,20 @@ services:
 
     # Deliberately NO `ipc: host`. carb (Kit's core) creates a POSIX shared
     # memory segment named after its own PID -- /dev/shm/carb-RStringInternals-<pid>
-    # -- and that PID is deterministic across runs. With `ipc: host` it lands in
-    # the HOST's sticky /dev/shm, where one stale root-owned file poisons that
-    # exact name permanently and Kit aborts before it starts:
+    # -- and that PID is deterministic across runs, so one unusable leftover at
+    # that exact name poisons it permanently and Kit aborts before it starts:
     #
     #   RStringInternals.inl:667 Assertion (false) failed:
     #     Failed to create shared memory named carb-RStringInternals-62
     #
-    # A private IPC namespace makes the collision structurally impossible. This
-    # was never about DDS, and merging the containers does not change it.
+    # Do NOT read this as "the container has a private /dev/shm". It does not:
+    # `- /dev:/dev` below recursively bind-mounts the host's /dev over the one
+    # Docker sets up, so /dev/shm inside IS the host's, measured 2026-09-13 by
+    # touching a file on one side and seeing it on the other. What makes the
+    # collision harmless now is the uid: this container is root and Kit creates
+    # those files 0666, so a leftover from an earlier root run is reusable.
+    # Dropping `ipc: host` is kept because it costs nothing and because the
+    # SysV/mqueue side of the namespace really is isolated by it.
 
     environment:
       # Which environment tb3_sim.py loads, by registry name (worlds/<name>/).
@@ -100,15 +105,16 @@ services:
       # runs as root. One image, one uid, one cookie.
       - XAUTHORITY=/root/.Xauthority
 
-      # Still here, still UDP-only, and now probably unnecessary: Fast-DDS
-      # creates its shared-memory segments 0700, which the old 1234-vs-root split
-      # made mutually unreadable, so discovery worked and data silently did not.
-      # With one uid that reason is gone. Removing it is its own change, with its
-      # own test -- see docs/history.md.
-      - FASTRTPS_DEFAULT_PROFILES_FILE=/etc/fastdds_udp_only.xml
+      # Fast-DDS is back on its default transports, shared memory included. It
+      # was forced onto UDP by docker/fastdds_udp_only.xml for as long as this
+      # was two containers: Fast-DDS creates its /dev/shm segments 0700, and
+      # across uid 1234 (NVIDIA's image ends `USER isaac-sim`) and root neither
+      # participant could open the other's, so discovery rode UDP multicast and
+      # looked healthy while not one byte of data moved. One image, one uid, and
+      # both participants in one IPC namespace: that failure cannot happen here.
+      # Measured after removing it -- see docs/history.md for the numbers.
 
     volumes:
-      - ./docker/fastdds_udp_only.xml:/etc/fastdds_udp_only.xml:ro
       - /dev:/dev
       - /run/udev:/run/udev
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
