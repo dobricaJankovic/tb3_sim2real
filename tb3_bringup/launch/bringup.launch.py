@@ -63,8 +63,8 @@ def setup(context, *args, **kwargs):
 
     # Only the simulated backends take a world, and only Gazebo can act on it
     # from here. For isaacsim the environment is chosen on the simulator side
-    # (tb3_sim.py --world, or WORLD= in docker-compose.yml) because Isaac Sim
-    # runs in its own container and this launch only attaches to it. Passing
+    # (tb3_sim.py --world, or WORLD= in docker-compose.yml) because this launch
+    # only attaches to a simulator that is already running and playing. Passing
     # world:= with backend:=isaacsim would therefore be a lie, so it is refused.
     backend_args = {}
     world = LaunchConfiguration('world').perform(context)
@@ -76,7 +76,7 @@ def setup(context, *args, **kwargs):
         raise RuntimeError(
             f"world:= is only meaningful for backend:=gazebo, not '{backend}'. "
             f"For isaacsim, select the world where the simulator is launched: "
-            f"`WORLD={world} docker compose run --rm isaacsim`.")
+            f"`isaacsim-python /scripts/tb3_sim.py --world {world}`.")
 
     actions = [
         # Same URDF drives the kinematic tree in all three worlds. Each backend

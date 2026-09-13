@@ -34,10 +34,10 @@ modes, so this cannot be fixed by committing anything.
 # Gazebo — selected by the ROS-side launch
 ros2 launch tb3_bringup bringup.launch.py backend:=gazebo world:=turtlebot3_world
 
-# Isaac Sim — selected where the simulator starts, not by bringup, because it
-# runs in its own container and bringup only attaches to it over DDS
-WORLD=turtlebot3_world docker compose run --rm isaacsim
-ros2 launch tb3_bringup bringup.launch.py backend:=isaacsim
+# Isaac Sim — selected where the simulator starts, not by bringup, which only
+# attaches to a running simulator over DDS
+docker compose exec tb3_ros isaacsim-python /scripts/tb3_sim.py --world turtlebot3_world
+ros2 launch tb3_bringup bringup.launch.py backend:=isaacsim   # another terminal
 ```
 
 `world:=` with `backend:=isaacsim` is refused rather than ignored — accepting it
