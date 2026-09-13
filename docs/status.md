@@ -127,7 +127,10 @@ Still open, and unchanged by this work:
   a world problem: Isaac publishes 3600 rays where Gazebo publishes 360, and
   reports no-return as `-1.0` (228 rays) where Gazebo uses `inf` (36 rays).
   Authoring a real LDS scan pattern is still the fix.
-- `nav:=true` still requires a map that does not exist yet.
+- `nav:=true` brings up the full Nav2 stack against the stock map in
+  `tb3_bringup/maps/`, on both simulated backends. AMCL needs one
+  `/initialpose` before `map->odom` appears; nothing publishes it but RViz's
+  *2D Pose Estimate* and your own `ros2 topic pub`.
 
 ## One container (2026-09-13)
 
@@ -146,24 +149,40 @@ Verified on branch `isaacsim-humble-single`:
   `odom->base_footprint`, `/cmd_vel` subscribed, no errors.
 - Cache volumes: `/scan` ready 164-168 s cold, **14 s warm**.
 
-### Check these before writing `turtlebot3_isaacsim`
+### Checked in the merged image (2026-09-13, after the merge)
 
-Ordered by how much they would change the package if they fail.
+Items 1-3 of the list written in `5735893` now have results. The simulator was
+`isaac/scripts/tb3_sim.py` unmodified, the ROS side `bringup.launch.py`, and
+both ran as `docker compose exec` into the one `tb3_ros` container.
 
-1. **`bringup.launch.py backend:=isaacsim` still works in one container.**
-   Asserted in commit `776bf55`, not tested. Attaching over DDS should be
-   unaffected by both endpoints sharing a container, but "should" is what
-   produced the 3/5 conclusion in September. This is the property that makes
-   the merge safely revertible, so it goes first.
-2. **The Isaac Sim GUI has never been run in the merged image.** Every test so
-   far was `--headless`. The whole point of the change is that you launch
-   bringup and *watch* the simulator come up, so X11 into this image — one
-   cookie at `/root/.Xauthority` now, not two — is load-bearing and unproven.
-   Run `./docker/x11-auth.sh` first.
-3. **`backend:=gazebo` in the merged image.** Gazebo Classic and Isaac Sim now
-   share one container, one GPU and one X display; nothing has asked them to
-   before. Gazebo was working end-to-end before the merge, so a regression here
-   is a merge problem, not a Gazebo problem.
+1. **`bringup.launch.py backend:=isaacsim` works in one container.** `PASS`.
+   `wait_for_sim` saw `/clock` 8 ms after start, `robot_state_publisher` loaded
+   all seven segments, and with `nav:=true` the whole Nav2 stack came up against
+   the stock map. Rates read from the ROS side, headless: `/clock` 60 Hz,
+   `/odom` 60 Hz, `/joint_states` 60 Hz, `/scan` 10 Hz — all higher than the
+   two-container numbers above, which were taken under a GUI-less but otherwise
+   loaded machine, so treat them as "no worse", not as a speedup measurement.
+2. **The Isaac Sim GUI runs in the merged image.** `PASS`. After
+   `./docker/x11-auth.sh` and a container restart to pick up the new cookie
+   inode, Kit opened a real 1440x900 `Isaac Sim Python 6.0.1` window on the host
+   X server through the single `/root/.Xauthority`, and RViz from the same
+   container opened beside it. Nav2 reported `Navigation: active` /
+   `Localization: active` in RViz's panel. GUI rendering costs the sim about
+   half its lidar rate: `/scan` 10 Hz headless, 5.3 Hz with the viewport drawing.
+3. **`backend:=gazebo` in the merged image.** `PASS`. gzserver and gzclient
+   both start, the robot spawns at the manifest pose, and the plugins advertise
+   as before: `/clock` 10 Hz, `/scan` 5 Hz, `/odom` 28 Hz, `/joint_states`
+   29 Hz, tf `odom->base_footprint` at `[-2.0, -0.5]`. `/cmd_vel` at 0.15 m/s
+   for ~5 s moved it to `[-1.19, -0.50]`. Sharing a container, a GPU and an X
+   display with Isaac Sim cost Gazebo nothing.
+
+AMCL publishes `map->odom` only after an initial pose, for both simulated
+backends — that is AMCL's normal behaviour (`set_initial_pose` is false), not a
+merge symptom. Publishing `/initialpose` once at the spawn pose localised it to
+`[-1.95, -0.48]`.
+
+### Still to check
+
 4. **Shared-memory DDS.** Drop `FASTRTPS_DEFAULT_PROFILES_FILE` and the
    `docker/fastdds_udp_only.xml` mount and confirm data still flows. The reason
    for UDP-only — Fast-DDS's 0700 segments across uid 1234 and root — is gone

@@ -694,3 +694,51 @@ verified: `/proc/1/comm` is `docker-init`, and the entrypoint form works.
 **Aside, for whoever writes the next test script.** `pkill -9 -f "isaac-sim"`
 matches the shell running it, because the pattern is in its own command line.
 It kills itself, the step produces no output, and the exec exits 137.
+
+---
+
+## 2026-09-13 — the merged container, checked against the list it shipped with
+
+Commit `5735893` left five checks. Three of them had answers today, and all
+three are `PASS`. What follows is only what was surprising or worth keeping.
+
+**`backend:=isaacsim` attaches to a simulator in its own container.** The
+worry was that the DDS path might behave differently once both endpoints sit
+inside one container; it does not. `wait_for_sim` logged
+`simulator connected` 8 ms after start. Headless rates read from the ROS side:
+`/clock` 60 Hz, `/odom` 60 Hz, `/joint_states` 60 Hz, `/scan` 10 Hz.
+
+**The GUI works, and the cookie has one path now.** `./docker/x11-auth.sh`
+rewrites `/tmp/tb3_sim2real.docker.xauth` by rename, so the file has a new
+inode and a container started earlier keeps the old one through its bind
+mount — the script says so and it is real: `docker compose restart tb3_ros`
+was needed before Kit could authenticate. After that, Kit opened a 1440x900
+`Isaac Sim Python 6.0.1` window and RViz opened beside it, both from the same
+container through the same `/root/.Xauthority`.
+
+**Drawing the viewport halves the lidar rate.** `/scan` is 10 Hz headless and
+5.3 Hz with the GUI up, same scene, same machine. Worth knowing before anyone
+reads a rate off a GUI run and files a lidar bug.
+
+**Gazebo Classic is unharmed by sharing the box with Isaac Sim.** gzserver and
+gzclient start, the robot spawns at the manifest pose, `/cmd_vel` at 0.15 m/s
+for ~5 s moved it 0.8 m. One GPU, one X display, two very different renderers,
+no conflict — though nothing has yet asked both simulators to run *at the same
+time*, and nothing should.
+
+**AMCL's silence is AMCL, not the merge.** `map->odom` never appears until an
+initial pose arrives, so `tf2_echo map base_footprint` fails with
+`Invalid frame ID "map"` and the global costmap logs `Timed out waiting for
+transform` forever. One `/initialpose` at the spawn pose fixed it and AMCL
+localised to `[-1.95, -0.48]` against a spawn of `[-2.0, -0.5]`. A single
+`ros2 topic pub -1` was NOT enough — the message lands before AMCL's
+subscription is matched and is dropped. `-r 2` for a few seconds works.
+
+**Trap 3 — a killed `docker compose exec` leaves its processes running.**
+`timeout 40 docker compose exec -T ... ros2 launch ...` kills the *client*;
+the launch keeps running inside the container. Two orphaned `ros2 launch`
+trees were publishing `robot_state_publisher` into the domain before this was
+noticed, which is exactly the kind of thing that makes a later measurement
+lie. Without a TTY there is no signal forwarding, so scripted runs must clean
+up inside the container: `docker compose exec -T tb3_ros pkill -INT -f
+"ros2 launch"`.
