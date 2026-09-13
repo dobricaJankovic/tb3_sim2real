@@ -7,16 +7,16 @@ Adding an environment is therefore a matter of adding a directory, never of
 editing launch files — which is the reason this module exists at all.
 
 The registry is a plain directory tree rather than an ament package because the
-isaacsim container has no ROS and cannot call get_package_share_directory. Both
-containers mount the same tree (see docker-compose.yml) and find it through
-TB3_WORLDS_DIR, so the two sides genuinely read the same files.
+Isaac side runs under Kit's own interpreter with the system ROS 2 stripped out
+(ros-isolate), so it cannot call get_package_share_directory. Both sides find
+the tree through TB3_WORLDS_DIR and genuinely read the same files.
 """
 
 import os
 
 import yaml
 
-#: Where the registry is mounted inside both containers. Overridable so the
+#: Where the registry is mounted in the container. Overridable so the
 #: generators and tests can run against a checkout on the host.
 ENV_VAR = 'TB3_WORLDS_DIR'
 DEFAULT_ROOT = '/worlds'
@@ -80,8 +80,8 @@ def world_file(name, worlds_root=None):
 def usd_file(name, worlds_root=None):
     """Generated Isaac Sim .usd for `name`. Not checked for existence here.
 
-    The USD is gitignored and built inside the isaacsim container, so a caller on
-    the ROS side cannot meaningfully verify it.
+    The USD is gitignored and built by scripts/build_world_usd.sh, so a fresh
+    checkout has none and a caller on the ROS side cannot verify it.
     """
     r = worlds_root or root()
     return os.path.join(r, name, 'isaac', f'{name}.usd')

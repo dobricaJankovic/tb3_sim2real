@@ -6,15 +6,11 @@ stage is opened, the ROS 2 interface is built, and `play()` is called from here.
 Nothing has to be clicked in the GUI, and `bringup.launch.py backend:=isaacsim`
 does not start any of it — that side only attaches to what this publishes.
 
-    # host, once per X session
-    ./docker/x11-auth.sh
-
-    # simulator (this script) — leave it running
-    docker compose run --rm --entrypoint /isaac-sim/python.sh isaacsim \
-        /scripts/tb3_sim.py
+    ./docker/x11-auth.sh                                 # host, per X session
+    docker compose exec tb3_ros isaacsim-python /scripts/tb3_sim.py
 
     # ROS side, second terminal
-    docker compose run --rm tb3_ros
+    docker compose exec tb3_ros bash
     ros2 launch tb3_bringup bringup.launch.py backend:=isaacsim
 
 Publishes the interface contract in docs/architecture.md: /clock, /odom,
@@ -40,9 +36,9 @@ from isaacsim import SimulationApp
 parser = argparse.ArgumentParser()
 parser.add_argument('--stage', default='/scenes/tb3_world.usd')
 # The environment, by registry name (worlds/<name>/). This is the isaacsim
-# counterpart of `bringup.launch.py world:=` — Isaac Sim runs in its own
-# container, so the world is chosen here rather than by the ROS-side launch,
-# which only attaches over DDS. Defaults to $WORLD, set in docker-compose.yml.
+# counterpart of `bringup.launch.py world:=`: the world is chosen here because
+# the ROS-side launch only attaches to a running simulator. Defaults to $WORLD,
+# set in docker-compose.yml.
 parser.add_argument('--world', default=os.environ.get('WORLD', 'turtlebot3_world'),
                     help='environment from the world registry; "" or --no-world '
                          'for the bare ground plane')
@@ -180,7 +176,7 @@ def attach_lidar():
 
     Uses the LaserScan writer rather than PointCloud2 on purpose: a point cloud
     would force a pointcloud_to_laserscan node into the isaacsim backend that
-    the other two backends do not have.
+    the other two backends do not need.
     """
     from isaacsim.sensors.experimental.rtx import Lidar, LidarSensor
 

@@ -2,7 +2,7 @@
 #
 # Smoke test for the combined Isaac Sim / ROS 2 images.
 #
-#   ./verify.sh isaacsim6-humble:latest
+#   ./verify.sh isaacsim6-humble:ngc
 #   ./verify.sh isaacsim6-jazzy:latest
 #
 # Checks, in order of how much they prove:

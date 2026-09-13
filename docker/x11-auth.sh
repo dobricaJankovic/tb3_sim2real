@@ -10,8 +10,7 @@
 # required, but no authorization protocol specified" and aborts. Presenting a
 # valid MIT-MAGIC-COOKIE via XAUTHORITY satisfies the server regardless of uid.
 #
-# One cookie, mounted at /root/.Xauthority. There were two paths while Isaac Sim
-# had its own container as uid 1234; see docker-compose.yml.
+# One cookie, mounted at /root/.Xauthority.
 #
 # Run this once per X session before `docker compose up`. Re-run if the X
 # session restarts (cookie rotates on login).

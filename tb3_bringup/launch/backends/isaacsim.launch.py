@@ -1,14 +1,14 @@
 """Isaac Sim backend — attach only.
 
-Isaac Sim runs in its OWN container (docker compose up isaacsim) and reaches us
-over DDS. There is deliberately nothing to spawn here.
+The simulator is started separately (`isaacsim-python /scripts/tb3_sim.py`) and
+reaches us over DDS; there is deliberately nothing to spawn here. This mirrors
+NVIDIA's carter_navigation.launch.py, which assumes the simulator is already
+running and playing on the DDS domain.
 
-Do NOT reach for isaacsim_bringup/run_isaacsim.launch.py from the NVIDIA
-workspaces: that node does subprocess.Popen("<install>/isaac-sim.sh ...") and so
-requires ros2, rclpy and isaac-sim.sh in the same filesystem and namespace —
-i.e. the single-container design we rejected (Isaac Sim's image is noble, Humble
-is jammy). The pattern we want is carter_navigation.launch.py, which assumes the
-simulator is already running and playing somewhere on the DDS domain.
+Starting Kit from a launch file is possible now that ros2 and isaac-sim.sh share
+a filesystem — that is what isaacsim_bringup/run_isaacsim.launch.py does, and
+what the planned turtlebot3_isaacsim package will build on. It is deliberately
+not done here; see docs/status.md.
 
 Isaac Sim supplies: /clock, /scan, /odom, /joint_states, tf odom->base_footprint,
 /cmd_vel sink — all from OmniGraph nodes built by isaac/scripts/tb3_sim.py.

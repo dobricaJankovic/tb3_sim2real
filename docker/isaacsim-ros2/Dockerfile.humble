@@ -16,11 +16,13 @@
 # that rclpy can be imported inside Kit. Nothing here needs that: the ROS 2
 # bridge is C++ and talks to the rest of the system over DDS.
 #
-#   docker build -f Dockerfile.humble -t isaacsim6-humble:latest .
+#   docker build -f Dockerfile.humble -t isaacsim6-humble:ngc .
+#
+# (scripts/build_images.sh does this, and the :ngc tag is what compose expects.)
 #
 #   docker run --rm -it --gpus all --network host --ipc host \
 #       -e ACCEPT_EULA=Y -e PRIVACY_CONSENT=Y \
-#       isaacsim6-humble:latest
+#       isaacsim6-humble:ngc
 #
 # Then, inside the container, `isaacsim` for the simulator and the usual ros2
 # tooling for everything else.

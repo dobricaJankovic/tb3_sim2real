@@ -6,7 +6,7 @@ transform and material binding. The stage then opens without a single error and
 renders nothing. This checks the one thing that separates the two cases: whether
 any renderable geometry has a non-empty bound.
 
-    /isaac-sim/python.sh /scripts/verify_asset.py [stage.usd] [robot-prim]
+    isaacsim-python /scripts/verify_asset.py [stage.usd] [robot-prim]
 
 Defaults to /scenes/tb3_world.usd and /World/turtlebot3. Exits non-zero when
 the robot subtree is empty, so it can gate a re-import.

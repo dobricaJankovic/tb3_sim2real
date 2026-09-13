@@ -1,9 +1,9 @@
 """Block until a simulator is actually publishing /clock.
 
 Nav2 with use_sim_time:=true will wait for /clock on its own, but it does so
-silently — which looks identical to a DDS domain mismatch, a separate /dev/shm,
-or simply forgetting to press Play in Isaac Sim. This node turns that into a
-readable line in the log.
+silently — which looks identical to a DDS domain mismatch or to simply never
+having started the simulator. This node turns that into a readable line in the
+log.
 """
 
 import rclpy
@@ -43,8 +43,8 @@ class WaitForSim(Node):
         if self._elapsed >= self._warn_after and not self._warned:
             self._warned = True
             self.get_logger().warn(
-                'still no /clock. Check: is the sim PLAYING? do both containers '
-                'share ROS_DOMAIN_ID? is ipc: host set on both (shared /dev/shm)?')
+                'still no /clock. Check: is the sim PLAYING? is tb3_sim.py '
+                'running? does it share ROS_DOMAIN_ID with this shell?')
 
 
 def main(args=None):

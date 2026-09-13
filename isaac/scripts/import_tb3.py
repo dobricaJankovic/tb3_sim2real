@@ -1,22 +1,20 @@
 """Import the TurtleBot3 URDF into Isaac Sim and assemble the base world stage.
 
-Two-container workflow — this script is only the isaacsim-side half. The URDF
-importer's core does not parse XACRO, and the isaacsim container has no
-ROS/xacro installed, so expand it in tb3_ros first and drop the flat URDF on
-the shared isaac/scenes/ bind mount:
+Two preparation steps first, both from a ROS shell in this same container
+(`docker compose exec tb3_ros bash`). The importer's core does not parse XACRO,
+so expand it into /scenes (the isaac/scenes/ bind mount):
 
-    docker exec <tb3_ros container> bash -c \
-      'source /opt/ros/humble/setup.bash; xacro \
-       $(ros2 pkg prefix --share turtlebot3_description)/urdf/turtlebot3_${TURTLEBOT3_MODEL}.urdf \
-       namespace:=' > isaac/scenes/turtlebot3_${TURTLEBOT3_MODEL}.urdf
+    xacro $(ros2 pkg prefix --share turtlebot3_description)/urdf/\
+turtlebot3_${TURTLEBOT3_MODEL}.urdf namespace:= \
+      > /scenes/turtlebot3_${TURTLEBOT3_MODEL}.urdf
 
-The expanded URDF still points at its meshes by `package://` URL, and the
-isaacsim container has no ROS and therefore no turtlebot3_description on disk
-to resolve them against. Copy the package's share directory onto the same bind
-mount (gitignored — 40 MB of STL):
+The expanded URDF points at its meshes by `package://` URL, and import_robot()
+below resolves that through an explicit path — /scenes/turtlebot3_description —
+rather than through the ROS package index, which ros-isolate strips before Kit
+starts. So the package's share directory has to be copied there (gitignored,
+40 MB of STL):
 
-    docker cp <tb3_ros container>:/opt/ros/humble/share/turtlebot3_description \
-      isaac/scenes/turtlebot3_description
+    cp -r /opt/ros/humble/share/turtlebot3_description /scenes/
 
 Skipping that step does NOT fail the import. The converter resolves each
 unmatched `package://turtlebot3_description/meshes/...` to a bare relative
@@ -25,9 +23,9 @@ transform, correct material binding, no geometry. You get a stage that loads
 clean and renders nothing at all, with the only visible clue being FLT_MAX
 sentinels in the asset's `extentsHint`. See docs/troubleshooting.md.
 
-Then, inside the isaacsim container:
+Then:
 
-    /isaac-sim/python.sh /scripts/import_tb3.py --model burger
+    isaacsim-python /scripts/import_tb3.py --model burger
 
 Produces:
     /scenes/turtlebot3_<model>.usd/...  the robot as a standalone, reusable asset

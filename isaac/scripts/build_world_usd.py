@@ -3,11 +3,11 @@
     scripts/build_world_usd.sh turtlebot3_world      # from the host
 
 Reads /worlds/<name>/world.yaml and writes /worlds/<name>/isaac/<name>.usd. Use
-the wrapper rather than calling this directly: it creates the writable output
-directory this container (uid 1234) cannot create for itself. The
-Gazebo counterpart is scripts/build_world.py, which reads the same manifest and
-the same meshes; that shared source is the only reason the two backends stay in
-agreement. See worlds/README.md.
+the wrapper rather than calling this directly: it creates the output directory
+on the host, so it stays yours rather than root's. The Gazebo counterpart is
+scripts/build_world.py, which reads the same manifest and the same meshes; that
+shared source is the only reason the two backends stay in agreement. See
+worlds/README.md.
 
 Isaac Sim ships no SDF importer (only URDF, MJCF and heightmap — checked in
 /isaac-sim/exts), which is why this authors USD directly rather than trying to
@@ -105,20 +105,17 @@ async def _convert(src, dst):
 def out_dir(world_dir):
     """Where this script's build products go: <world>/isaac/.
 
-    A dedicated subdirectory because this container runs as uid 1234 while the
-    checkout belongs to the host user, so the output directory has to be
-    world-writable. Confining that to one gitignored subdirectory keeps the
-    manifest and the meshes at normal permissions. scripts/build_world_usd.sh
-    creates it — git records no directory modes, so a fresh clone would
-    otherwise fail here with EACCES.
+    A dedicated gitignored subdirectory, so everything this container writes as
+    root is confined to one place and the manifest and meshes keep normal
+    permissions. scripts/build_world_usd.sh creates it host-side, which is why
+    this only checks.
     """
     d = os.path.join(world_dir, 'isaac')
     if not os.path.isdir(d):
         raise SystemExit(
             f'build_world_usd: {d} does not exist.\n'
-            f'  This container is uid 1234 and cannot create it inside a '
-            f'checkout owned by you.\n'
-            f'  Run the wrapper instead, which creates it writable first:\n'
+            f'  Run the wrapper instead, which creates it on the host first so '
+            f'it does not end up owned by root:\n'
             f'    scripts/build_world_usd.sh {os.path.basename(world_dir)}')
     return d
 
@@ -130,11 +127,11 @@ def convert_mesh(world_dir, rel_uri):
         raise SystemExit(f'build_world_usd: manifest references missing mesh {src}')
     cache = os.path.join(out_dir(world_dir), '_converted')
     os.makedirs(cache, exist_ok=True)
-    # This container is uid 1234 and the checkout is yours, so a default-mode
-    # directory here is one you cannot delete from. That matters more than it
-    # sounds: the cache is keyed on mtime only, so a stale entry is reused
-    # silently after a converter FLAG changes, and the rebuild you just ran was
-    # not the rebuild you thought. Keep it clearable from the host.
+    # This container is root and the checkout is yours, so a default-mode cache
+    # directory is one you cannot clear. That matters more than it sounds: the
+    # cache is keyed on mtime only, so a stale entry is reused silently after a
+    # converter FLAG changes, and the rebuild you just ran was not the rebuild
+    # you thought. Keep it clearable from the host.
     try:
         os.chmod(cache, 0o777)
     except OSError:

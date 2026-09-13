@@ -1,10 +1,5 @@
 # The tb3_sim2real image: TurtleBot3 on top of Isaac Sim + ROS 2 Humble.
 #
-# Isaac Sim IS in here now, and that is the change of 2026-09-13. This used to
-# say it "must not be" and that Isaac Sim "lives in its own noble-based image",
-# because a locally built Isaac Sim needs GLIBC_2.38 and jammy has 2.35. NVIDIA's
-# *released* build is compiled to 2.34 and runs here; see docs/architecture.md.
-#
 # Two Dockerfiles, deliberately:
 #
 #   docker/isaacsim-ros2/Dockerfile.humble  Isaac Sim + ROS 2 Humble, and
@@ -14,7 +9,7 @@
 #       the TurtleBot3 description, the real-robot drivers, the sim worlds, and
 #       the workspace the bringup package is built in.
 #
-# The base is built first. scripts/build_images.sh does both in order.
+# The base is built first; scripts/build_images.sh does both in order.
 
 ARG BASE_IMAGE=isaacsim6-humble:ngc
 FROM ${BASE_IMAGE}
@@ -29,11 +24,6 @@ ENV COLCON_WS=/ws
 # gazebo-ros-pkgs, gazebo-ros2-control, xacro, tf2-tools,
 # pointcloud-to-laserscan, colcon and vcstool. Audited against the built image
 # rather than assumed, so this list is only the remainder.
-#
-# The old rviz2-instead-of-desktop trick is gone with them. It saved ~466 MB by
-# skipping the tutorials and demos, which mattered against a 5 GB image and does
-# not against a 38 GB one where Isaac Sim is 25 GB of it. demo-nodes-cpp comes
-# with desktop anyway, and talker/listener stays the cheapest DDS check there is.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-${ROS_DISTRO}-joint-state-publisher \
     ros-${ROS_DISTRO}-cartographer \
