@@ -4,25 +4,24 @@
 # Isaac Sim) on the host X server without permanently loosening access
 # control via `xhost +`.
 #
-# Host X access control is per-UID (`xhost` shows `SI:localuser:<you>`), and
-# neither container runs as you — tb3_ros is root, isaacsim is uid 1234
-# (NVIDIA's Dockerfile ends with `USER isaac-sim`). So plain `/tmp/.X11-unix`
+# Host X access control is per-UID (`xhost` shows `SI:localuser:<you>`), and the
+# container does not run as you — it runs as root. So plain `/tmp/.X11-unix`
 # + DISPLAY mounts aren't enough; the client fails with "Authorization
 # required, but no authorization protocol specified" and aborts. Presenting a
 # valid MIT-MAGIC-COOKIE via XAUTHORITY satisfies the server regardless of uid.
 #
-# The cookie must land somewhere the container's uid can actually read: see the
-# per-service XAUTHORITY paths in docker-compose.yml (they differ on purpose).
+# One cookie, mounted at /root/.Xauthority. There were two paths while Isaac Sim
+# had its own container as uid 1234; see docker-compose.yml.
 #
-# Run this once per X session before `docker compose run`/`up`. Re-run if the
-# X session restarts (cookie rotates on login).
+# Run this once per X session before `docker compose up`. Re-run if the X
+# session restarts (cookie rotates on login).
 #
 #   ./docker/x11-auth.sh
-#   docker compose run --rm tb3_ros
+#   docker compose up -d
 #
-# The ordering above is load-bearing, not a style preference: both services
-# bind-mount this file, and Docker's behaviour for a bind-mount source that
-# does not exist is to CREATE IT AS A ROOT-OWNED DIRECTORY. Start a container
+# The ordering above is load-bearing, not a style preference: the compose file
+# bind-mounts this file, and Docker's behaviour for a bind-mount source that
+# does not exist is to CREATE IT AS A ROOT-OWNED DIRECTORY. Start the container
 # first and the cookie slot is permanently occupied by a directory that this
 # script cannot then overwrite — see the guard below.
 
@@ -49,16 +48,15 @@ A directory here means a container was started before this script ever ran:
 Docker creates a root-owned directory in place of a bind-mount source that does
 not exist. An unwritable file usually means an earlier run created it as root.
 
-Either way the containers mount it as their XAUTHORITY and silently open no
-window: Kit downgrades the X auth failure to a warning, keeps simulating, and
-its healthcheck still says healthy.
+Either way the container mounts it as XAUTHORITY and silently opens no window:
+Kit downgrades the X auth failure to a warning and keeps simulating.
 
 Clear it, re-key, and restart the container (in that order):
 
-  docker stop isaacsim
+  docker compose down
   sudo rm -rf $XAUTH
   $0
-  docker compose run --rm isaacsim
+  docker compose up -d
 EOF
   exit 1
 fi
@@ -69,5 +67,6 @@ chmod 644 "$XAUTH"
 
 # `xauth nmerge` writes a temp file and renames it into place, so this path has
 # a NEW inode now. A container started earlier still holds the old one through
-# its bind mount and will not see this cookie — restart it after re-keying.
+# its bind mount and will not see this cookie — `docker compose restart tb3_ros`
+# after re-keying. Confirmed the hard way on 2026-09-13.
 echo "Wrote $XAUTH for DISPLAY=$DISPLAY (restart any running container to pick it up)"

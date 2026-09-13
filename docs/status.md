@@ -199,13 +199,35 @@ merge symptom. Publishing `/initialpose` once at the spawn pose localised it to
    them. Comments in `docker-compose.yml` and `docs/troubleshooting.md`
    corrected.
 
+5. **`up -d` + `exec` is the documented path.** Decided, and the docs now say
+   so (`README.md`, `docs/setup.md`, `docs/troubleshooting.md`,
+   `docker/x11-auth.sh`). `run --rm` does run the entrypoint and does start in
+   1.2 s off the same warm volumes — but it builds a *new container* each time,
+   and `/ws/install` is in the container's writable layer, not a volume. A fresh
+   container has `/ws/src` and nothing else, so `ros2 launch tb3_bringup` fails
+   with `Package 'tb3_bringup' not found` until you rebuild — in every terminal,
+   since every terminal would be a different container. The simulator is also a
+   process you attach terminals *to*, which is what `exec` is.
+
+   The cost accepted with it is the entrypoint trap: scripted, non-interactive
+   work must go through `docker compose exec tb3_ros /entrypoint.sh <cmd>`. A
+   real fix exists — `ENV BASH_ENV=/etc/ros_env.sh` in the image, which bash
+   reads for non-interactive shells — but it would also fire inside
+   `/isaac-sim/python.sh` (itself `#!/bin/bash`) and put the system ROS back on
+   Kit's search paths *after* `ros-isolate` stripped them. It is only safe if
+   `ros-isolate` also unsets `BASH_ENV`. Not done; noted as an option.
+
+   The same pass fixed `scripts/build_world_usd.sh`, which still ran
+   `docker compose run --rm ... isaacsim` — a service deleted by the merge — and
+   bypassed `ros-isolate` with `--entrypoint /isaac-sim/python.sh`. It is now
+   `run --rm tb3_ros isaacsim-python`, deliberately the one place that keeps
+   `run --rm`: a one-shot batch job that needs no workspace and no running
+   simulator. Re-ran it end to end: 32 s, `verify: OK — Isaac stage matches the
+   Gazebo world`.
+
 ### Still to check
 
-5. **Decide `exec` vs `run --rm` as the documented path.** The warm cache lives
-   in named volumes, so `docker compose run --rm tb3_ros` gets the same 14 s
-   start *and* runs the entrypoint, avoiding the silent-failure trap where
-   `exec` leaves no `ros2` on `PATH` in a non-interactive shell. `up -d` +
-   `exec` only buys attached shells.
+Nothing from the list of five. Next is the package itself.
 
 ### Then the package
 

@@ -37,8 +37,9 @@ Full write-up: <https://claude.ai/code/artifact/f7809bfe-4918-4977-938c-e008f28c
 
 ## One container or two
 
-Two containers is what the repo does today. The reason recorded here for it was
-wrong, and the way it was wrong is the part worth keeping.
+One container is what the repo does today, since 2026-09-13. Two containers is
+what it did before, and the reason recorded here for that was wrong; the way it
+was wrong is the part worth keeping.
 
 Tested on 2026-09-06: both combined images built, `verify.sh` scored
 `isaacsim6-jazzy` 5/5 and `isaacsim6-humble` 3/5. Nine of 1104 shared objects

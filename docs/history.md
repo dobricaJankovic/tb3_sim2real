@@ -787,3 +787,49 @@ first `ros2 launch tb3_bringup` after any recreate fails with
 `Package 'tb3_bringup' not found`. `colcon build` is 1.5 s here, so this is a
 papercut rather than a problem, but it is a live input to the open item 5:
 `docker compose run --rm` would hit it on *every* run.
+
+---
+
+## 2026-09-13 — `up -d` + `exec` wins, and the docs catch up with the merge
+
+**Decision:** the documented way in is `docker compose up -d` once, then
+`docker compose exec tb3_ros ...` per terminal. `run --rm` was the incumbent and
+had a real case — it runs the entrypoint, so no silent missing-`ros2` trap, and
+it starts in 1.2 s off the same warm cache volumes.
+
+**What decided it:** `/ws/install` lives in the container's writable layer, not
+in a volume. `run --rm` builds a new container every time, so the workspace
+overlay is simply absent — `ros2 launch tb3_bringup` fails `Package not found`
+until you `colcon build` again, *per terminal*, because each terminal is a
+different container. Measured today, twice, the second time by accident:
+`docker compose up -d` recreating the container after the compose edit wiped
+`/ws/install` and the next launch failed exactly that way. The other half of it
+is that Isaac Sim is a long-lived process you attach terminals to; `exec` joins
+the container running it, `run --rm` starts a stranger.
+
+**The trap stays, with a fix on the shelf.** `exec` skips the entrypoint, and
+`bash -c 'ros2 ...'` lands in a shell with no `ros2`. `ENV BASH_ENV=/etc/…` in
+the image would fix it properly — bash reads `BASH_ENV` for non-interactive
+shells — except `/isaac-sim/python.sh` is itself `#!/bin/bash`, so it would
+re-source the system ROS *after* `ros-isolate` stripped it and break Kit in the
+exact way `ros-isolate` exists to prevent. Safe only if `ros-isolate` unsets
+`BASH_ENV` as part of its job, which is arguably where that belongs. Not done.
+
+**`scripts/build_world_usd.sh` was broken by the merge and nobody had run it.**
+It called `docker compose run --rm ... isaacsim` — a service that stopped
+existing in `776bf55` — and reached Kit through `--entrypoint
+/isaac-sim/python.sh`, bypassing `ros-isolate`, which in the merged image means
+the system ROS 2 stays ahead of Kit's own paths. Now `run --rm tb3_ros
+isaacsim-python`, and deliberately the one command that keeps `run --rm`: a
+one-shot batch job with no workspace and no running simulator to attach to.
+Re-ran it end to end — 32 s, `verify: OK — Isaac stage matches the Gazebo
+world`. Its `chmod 777` is gone with the uid it was for; the generated `.usd` is
+now root-owned in the checkout instead, which the header says out loud.
+
+**Docs.** `README.md`, `docs/setup.md`, `docs/troubleshooting.md` and
+`docker/x11-auth.sh` still described two containers, two cookie paths, an
+`isaacsim` service, and an Isaac Sim image built from source on this host. All
+four rewritten. The lesson worth keeping is the one the world-build script
+taught: a deleted compose service does not announce itself, and every `docker
+compose run --rm <service>` in a script or a doc is a reference that the merge
+silently invalidated.

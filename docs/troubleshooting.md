@@ -29,27 +29,27 @@
 - **QoS on `/scan`.** Sensor data usually wants Best Effort. A Reliable
   subscriber against a Best Effort publisher shows up in `ros2 topic list` while
   delivering nothing.
-- **X11 for two containers.** Both Isaac Sim and RViz need `DISPLAY` and
-  `/tmp/.X11-unix`. Neither container runs as you, but host X access control is
-  per-UID (`xhost` shows `SI:localuser:<you>`), so the socket mount alone isn't
-  enough — `gzclient`/RViz/Kit abort with "Authorization required, but no
+- **X11.** Isaac Sim, gzclient and RViz all need `DISPLAY` and
+  `/tmp/.X11-unix`. The container does not run as you, but host X access control
+  is per-UID (`xhost` shows `SI:localuser:<you>`), so the socket mount alone
+  isn't enough — `gzclient`/RViz/Kit abort with "Authorization required, but no
   authorization protocol specified". Run `docker/x11-auth.sh` once per X session
-  before `docker compose up/run` — it writes a re-keyed Xauthority cookie
-  (family `ffff`, so it matches any hostname) that compose mounts into both
-  services. (`xhost +local:root` also works but permanently loosens host X
-  access control instead of scoping a cookie.)
-- **The two services mount that cookie at different paths.** `tb3_ros` runs as
-  root and reads `/root/.Xauthority`. `isaacsim` does *not* run as root —
-  NVIDIA's Dockerfile ends with `USER isaac-sim` (uid 1234, home `/isaac-sim`),
-  and uid 1234 cannot traverse `/root`, so it reads `/tmp/.docker.xauth`
-  instead (`/tmp` is chowned to `isaac-sim` by the image). Mounting the cookie
-  under `/root` for `isaacsim` fails **silently**: Kit logs `GLFW initialization
-  failed`, `failed to open the default display`, and `IAppWindow::startup
-  failed`, then keeps running with no window — and `docker ps` still says
-  `healthy`, because the image's healthcheck only greps the Kit log for
-  `AppReady`. Symptom: "the container is up but no Isaac Sim window appeared."
-  Check `/isaac-sim/.nvidia-omniverse/logs/Kit/*/*/kit_*.log` for the GLFW
-  lines to confirm.
+  before `docker compose up` — it writes a re-keyed Xauthority cookie (family
+  `ffff`, so it matches any hostname) that compose mounts at
+  `/root/.Xauthority`. (`xhost +local:root` also works but permanently loosens
+  host X access control instead of scoping a cookie.)
+  There is one cookie path since the 2026-09-13 merge. There were two while
+  Isaac Sim had its own container: NVIDIA's Dockerfile ends with
+  `USER isaac-sim` (uid 1234, home `/isaac-sim`), and uid 1234 cannot traverse
+  `/root`, so that service read `/tmp/.docker.xauth` instead.
+- **Kit with no X access does not stop; it runs windowless.** It logs `GLFW
+  initialization failed`, `failed to open the default display` and
+  `IAppWindow::startup failed` as warnings, then keeps simulating and publishing
+  ROS topics normally. Symptom: "it's up but no Isaac Sim window appeared."
+  Confirm in `/isaac-sim/kit/logs/Kit/*/*/kit_*.log` (a named volume, so it
+  outlives the container). Verified working on 2026-09-13: Kit opens a 1440x900
+  `Isaac Sim Python 6.0.1` window on the host X server, `xwininfo -root -tree`
+  from the host lists it.
 - **Starting a container before `x11-auth.sh` turns the cookie into a
   directory.** Same windowless symptom as above, different cause, and the one
   you actually hit in practice — the ordering in the compose header is
@@ -61,10 +61,10 @@
   root-owned directory — so it now detects this and prints the fix instead of
   failing on `touch`:
 
-      docker stop isaacsim
+      docker compose down
       sudo rm -rf /tmp/tb3_sim2real.docker.xauth
       ./docker/x11-auth.sh
-      docker compose run --rm isaacsim
+      docker compose up -d
 
   The restart at the end is required, not tidiness: `xauth nmerge` writes a
   temp file and renames it into place, so re-keying gives the path a new inode

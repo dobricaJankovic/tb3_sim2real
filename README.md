@@ -20,18 +20,22 @@ cannot drift. Adding an environment is a new directory, not a code change.
 
 ```bash
 ros2 launch tb3_bringup bringup.launch.py backend:=gazebo world:=turtlebot3_world
-WORLD=turtlebot3_world docker compose run --rm isaacsim   # Isaac picks it here
+
+# Isaac picks its world where the simulator starts, not on the ROS side:
+docker compose exec tb3_ros isaacsim-python /scripts/tb3_sim.py --world turtlebot3_world
 ```
 
-Isaac Sim runs in its own container, so its world is selected where the
-simulator starts rather than by `bringup.launch.py`, which only attaches to it.
+`bringup.launch.py backend:=isaacsim` only *attaches* to a running simulator, so
+the world is chosen where Kit is started. Everything runs in one container —
+Isaac Sim, Gazebo, Nav2 and the real-robot drivers — and you open a terminal
+into it with `docker compose exec`; see [`docs/setup.md`](docs/setup.md).
 
 ## Docs
 
-- [`docs/architecture.md`](docs/architecture.md) — the two-container split, repo
-  layout, the Nav2 interface contract, and build order.
-- [`docs/setup.md`](docs/setup.md) — getting started, where the two Docker
-  images come from.
+- [`docs/architecture.md`](docs/architecture.md) — why it is one container,
+  repo layout, the Nav2 interface contract, and build order.
+- [`docs/setup.md`](docs/setup.md) — getting started, the `up -d` + `exec`
+  workflow, and where the two Docker images come from.
 - [`docs/troubleshooting.md`](docs/troubleshooting.md) — failure modes that
   don't throw errors.
 - [`worlds/README.md`](worlds/README.md) — the world registry: how one manifest

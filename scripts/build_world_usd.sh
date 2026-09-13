@@ -7,16 +7,23 @@
 # the same worlds/<name>/world.yaml. Both read the same manifest and the same
 # meshes; that is what keeps the two backends from drifting.
 #
-# This wrapper exists for one reason: the isaacsim container runs as uid 1234
-# (NVIDIA's image ends `USER isaac-sim`) while your checkout is owned by you, so
-# the container cannot create its own output directory. Git records no directory
-# modes, so this cannot be fixed by committing anything — it has to happen at
-# build time, on every clone.
+# This wrapper exists to create the output directory before the container needs
+# it, and to go through `isaacsim-python` rather than /isaac-sim/python.sh --
+# the wrapper runs ros-isolate, which takes the system ROS 2 back off Kit's
+# search paths. Calling python.sh directly from this image loads the wrong
+# interpreter's modules and Kit aborts.
 #
-# The directory is made world-writable rather than the whole world directory, so
-# world.yaml and meshes/ keep normal permissions. Files inside end up owned by
-# uid 1234, but you can still delete them because the parent directory is yours
-# and writable — which is what makes this better than chmod-ing the world dir.
+# `run --rm` rather than `exec`, deliberately and unlike the rest of the
+# workflow (see docs/setup.md): this is a one-shot batch job that needs no
+# workspace overlay and no running simulator, so it should not require
+# `docker compose up -d` first. It still gets the warm Kit cache, which lives in
+# named volumes.
+#
+# The container runs as root, so the generated worlds/<name>/isaac/<name>.usd is
+# root-owned in your checkout. It is gitignored, and `rm` on it wants sudo --
+# delete it from inside the container instead:
+#
+#   docker compose run --rm tb3_ros rm -rf /worlds/<name>/isaac
 set -euo pipefail
 
 WORLD="${1:-turtlebot3_world}"
@@ -30,11 +37,9 @@ if [[ ! -f "$DIR/world.yaml" ]]; then
 fi
 
 mkdir -p "$DIR/isaac"
-chmod 777 "$DIR/isaac"
 
 cd "$REPO"
 exec docker compose run --rm \
     -e PYTHONUNBUFFERED=1 \
     -e "WORLD=$WORLD" \
-    --entrypoint /isaac-sim/python.sh \
-    isaacsim /scripts/build_world_usd.py --world "$WORLD"
+    tb3_ros isaacsim-python /scripts/build_world_usd.py --world "$WORLD"
