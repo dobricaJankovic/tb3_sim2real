@@ -906,3 +906,33 @@ reports its arguments; the `OpaqueFunction` assembles the expected `standalone:=
 string in both the empty-world and turtlebot3_world cases; and the standalone
 script's real `parse_args()` accepts `--x-pose -2.0` (argparse's negative-number
 matcher) and resolves its default asset path from `TURTLEBOT3_MODEL`.
+
+## 2026-09-13 (last) — `turtlebot3_isaacsim` split out to its own repo
+
+Now at `~/turtlebot3_ws/src/turtlebot3_isaacsim`, its own git repo, beside
+`turtlebot3` and `turtlebot3_simulations` in the same colcon workspace — which
+is how every other TurtleBot3 package already lives. It is developed
+independently from here on, and `tb3_sim2real` will import it alongside
+`turtlebot3_gazebo` rather than contain it.
+
+**`turtlebot3_isaacsim/` in this repo is now a stale duplicate.** It is left in
+place only until the new repo is confirmed, and should then be deleted outright
+rather than kept in sync. Two copies of a simulator launcher is exactly the
+drift this project spends its effort avoiding everywhere else.
+
+**The comparison prose left the code.** The first draft explained itself against
+`turtlebot3_gazebo` in every docstring, which made the package read as an essay
+about Gazebo rather than as a peer of it. All of it now lives in one
+`DESIGN.md` beside the README, and the code carries only short notes at the
+traps. Calibrated rather than guessed: `flake8` over `turtlebot3_gazebo`'s own
+`launch/` reports 39 findings across exactly three classes (`D100`, `D103`,
+`I201` — ament's docstring and import-grouping opinions, which ROBOTIS does not
+satisfy either). The new package reports the same three classes plus the import
+ordering that booting `SimulationApp` before the `isaacsim.*` imports forces,
+and nothing else.
+
+**Lesson worth keeping.** "Document the reasoning" and "keep the code clean"
+pulled in opposite directions here, and the resolution was not a compromise
+between them: the reasoning was worth every word, it was just in the wrong file.
+A package that has to be a drop-in peer of another should *read* like that peer,
+because whoever reaches for it will have the peer open beside it.
