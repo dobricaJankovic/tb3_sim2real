@@ -628,3 +628,24 @@ vendor artifact. The September 3/5 was the local build and nothing else.
 the cache volumes, not a defect — but it means `verify.sh` is close to timing
 out on a cold machine and the poll budget should probably grow before anyone
 relies on it in CI.
+
+## 2026-09-13 (later still) — the whole interface contract, one container
+
+`tb3_sim.py` mounted unchanged into `isaacsim6-humble:ngc`, `--headless`, and
+every topic in the contract came up:
+
+    /scan           6.034 Hz      tf odom -> base_footprint  present
+    /odom          34.120 Hz      /cmd_vel                   advertised
+    /joint_states  38.479 Hz      [Error] lines in sim log:  none
+    /clock         37.792 Hz
+
+So it is not just the bridge: the RTX lidar renders headless with no display,
+the differential drive publishes, and the raw `odom->base_footprint` transform
+is the one the design expects. Nothing in the script needed changing to move
+from the noble container to the jammy one.
+
+**Two numbers worth remembering.** `/scan` was advertised 166 seconds after
+start, cold — the third measurement in a row pointing at cache volumes. And
+`/clock` advances at ~38 Hz against a 1/60 s physics step, so the sim runs at
+roughly 0.6x real time on this box with the lidar on. That is a Nav2 tuning
+input, not a fault, and `use_sim_time` already covers correctness.
