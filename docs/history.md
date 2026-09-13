@@ -605,3 +605,26 @@ on one machine — is what caused the error at the top of this entry.
 
 **Design note.** The `turtlebot3_isaacsim` proposal that follows from this:
 <https://claude.ai/code/artifact/e83a0463-ff46-4f38-b227-c025cd4b5a7e>
+
+## 2026-09-13 (later) — 5/5 on the real artifact
+
+`nvcr.io/nvidia/isaac-sim:6.0.1` pulled (NGC login required; anonymous returns
+401 on the manifest), bridge libraries confirmed `GLIBC_2.34`, then
+`docker build -f docker/isaacsim-ros2/Dockerfile.humble -t isaacsim6-humble:ngc`
+and `verify.sh` unmodified:
+
+    PASS  ROS 2 environment, RViz, Nav2 and the shared tooling
+    PASS  Gazebo, and the ros_gz bridge
+    PASS  ros-isolate strips ROS 2 and keeps the DDS settings
+    PASS  Kit starts and reports its version
+    PASS  ROS 2 bridge publishes /clock to the system ROS 2 installation
+    5 passed, 0 failed, 0 skipped
+
+Isaac Sim 6.0 and ROS 2 Humble in one Ubuntu 22.04 container, every part a
+vendor artifact. The September 3/5 was the local build and nothing else.
+
+**Still cold-start bound.** Step 5 took most of its 180-second budget because
+`--rm` discards `/root`, where Kit writes its caches. That is the argument for
+the cache volumes, not a defect — but it means `verify.sh` is close to timing
+out on a cold machine and the poll budget should probably grow before anyone
+relies on it in CI.

@@ -65,6 +65,15 @@ returned sim time. A second run against a writable tree logged no errors at all;
 the RTX and Python-node-registration complaints in the first were artifacts of
 a read-only mount.
 
+Then built for real and re-tested the same day. `Dockerfile.humble` with
+`ISAACSIM_IMAGE=nvcr.io/nvidia/isaac-sim:6.0.1`, `verify.sh` unmodified:
+
+    5 passed, 0 failed, 0 skipped
+
+Same script and same image name that scored 3/5 on 2026-09-06. The NGC
+artifact's bridge libraries were checked first and are `GLIBC_2.34`, matching
+the tarball, so the release floor holds for the container as well as the zip.
+
 So one Ubuntu 22.04 container — official ROS 2 Humble plus the official Isaac
 Sim release — is supported ground, and every part stays a vendor artifact. That
 was the standard the 2026-09-06 decision was made against, so the decision is
