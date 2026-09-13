@@ -1,0 +1,7 @@
+# Robot assets and worlds are build artifacts: large, generated, and derived
+# from turtlebot3_description. Build them with scripts/build_models.sh.
+models/turtlebot3_burger/
+models/turtlebot3_waffle/
+models/turtlebot3_waffle_pi/
+worlds/*.usd
+worlds/*.usda

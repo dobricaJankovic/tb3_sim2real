@@ -833,3 +833,76 @@ four rewritten. The lesson worth keeping is the one the world-build script
 taught: a deleted compose service does not announce itself, and every `docker
 compose run --rm <service>` in a script or a doc is a reference that the merge
 silently invalidated.
+
+## 2026-09-13 (later) — `turtlebot3_isaacsim`, written
+
+A standalone package, peer of `turtlebot3_gazebo`, not a `tb3_bringup` backend:
+its own models, its own worlds, its own substitution for the real bringup. The
+plan in `docs/status.md` ("Then the package") is now code. Not yet run.
+
+**The prior art was the whole design.** `isaacsim_bringup`
+(`IsaacSim-ros_workspaces/humble_ws/src/`) is NVIDIA's own "start Isaac Sim from
+a launch file" and is exactly the `gzserver.launch.py` analog, so the package
+wraps it rather than reinventing it. It is neither in our image nor mounted,
+which makes vendoring it a prerequisite rather than a given.
+
+**Four sharp edges, all found by reading `run_isaacsim.py` rather than its
+docs.** They are now pinned down once in `launch/isaacsim.launch.py`:
+
+1. On the `standalone:=` path, `headless`, `gui`, `custom_args` and
+   `play_sim_on_start` are **all ignored** — the branch is a bare
+   `Popen(f"{python.sh} {standalone}")`. So `headless:=` has to become the
+   standalone script's own argv.
+2. `standalone` is pasted into a `shell=True` string with no quoting. That is
+   how arguments reach the script at all, and it is why the launch file refuses
+   any argument containing a space instead of letting it split silently.
+3. `use_internal_libs:=true` strips `/opt/ros/<distro>` and the other distro's
+   name — but **not a colcon overlay**. Your own workspace survives on
+   `PYTHONPATH`/`LD_LIBRARY_PATH` and is inherited by Kit's Python 3.12, which
+   is precisely the pollution the stripping exists to prevent. `exclude_install_path`
+   is the vendor's mechanism; it now defaults to `$COLCON_PREFIX_PATH`, verified
+   resolving to `/tmp/ws/install` in a test build.
+4. `install_path` must be passed whenever Isaac Sim is not at the version-derived
+   default under `$HOME`.
+
+**Two Gazebo launch files have no counterpart, and both absences are
+structural.** `gzclient` — Gazebo splits server and GUI into two processes,
+Kit is one process that either opens a window or does not. And
+`spawn_turtlebot3` — checked directly rather than assumed: NVIDIA's service
+surface (`isaac_ros2_messages`) is `GetPrims`, `Get`/`SetPrimAttribute` and
+`IsaacPose`, i.e. inspection, attribute setting and pose teleport, but
+**nothing that creates a prim**. There is no `libgazebo_ros_factory.so`
+equivalent, so the robot is referenced into the stage by the simulator script
+and `x_pose`/`y_pose` are forwarded to it. The argument names are kept
+identical so muscle memory transfers.
+
+**Concept — the interpreter split decides the file layout.** The standalone
+script runs on Kit's Python 3.12 with ROS 2 stripped, so it cannot call
+`get_package_share_directory`. Every path it needs must arrive as an absolute
+argument from the launch file, which does have ament. NVIDIA hit the same wall
+and solved it the same way for `open_isaacsim_stage.py`. This is the same
+constraint that made `worlds.py` a plain directory tree, and it is worth
+stating as a rule: **in this project, anything Kit needs to find, ROS has to
+hand it.**
+
+**The tilted-lidar problem has a real fix now.**
+`app.sensors.nv.lidar.profileBaseFolder` is a settings *list* the renderer walks
+to resolve a profile by name, so a package can append its own folder and ship
+its own sensor model. `models/lidar_configs/turtlebot3_lds.json` is an authored
+TB3 LDS — 360 samples/rev at 5 Hz, 0.12–3.5 m, and **0° elevation**, against
+`Example_Rotary_2D`'s `elevationDeg = [-2.0]` that made it scan the floor. Matches
+`turtlebot3_gazebo`'s `<ray>` block field for field. Unverified until run.
+
+**`docs/status.md` contradicts itself and should be corrected.** One bullet
+still says the RTX lidar produces no messages at all under `--headless`. The
+2026-09-13 entries above record `/scan` at 6.03 Hz and 10 Hz headless, and say
+plainly that it renders headless with no display. The bullet is stale; it would
+otherwise steer the new package toward a guard it does not need.
+
+**Verified, so far as it can be without a GPU run:** the package builds under
+`colcon` and installs every directory where it should; `empty_world.launch.py`
+loads through the full include chain with `isaacsim_bringup` vendored in and
+reports its arguments; the `OpaqueFunction` assembles the expected `standalone:=`
+string in both the empty-world and turtlebot3_world cases; and the standalone
+script's real `parse_args()` accepts `--x-pose -2.0` (argparse's negative-number
+matcher) and resolves its default asset path from `TURTLEBOT3_MODEL`.
