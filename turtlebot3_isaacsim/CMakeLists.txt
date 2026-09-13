@@ -15,8 +15,17 @@ find_package(ament_cmake REQUIRED)
 # No targets to build: unlike turtlebot3_gazebo there are no C++ Gazebo plugins
 # here. Isaac Sim's equivalent of a model plugin is an OmniGraph node, authored
 # from Python inside Kit -- see scripts/turtlebot3_isaacsim.py.
-install(DIRECTORY launch models scripts worlds
+install(DIRECTORY launch models worlds
   DESTINATION share/${PROJECT_NAME}/
+)
+
+# USE_SOURCE_PERMISSIONS, because install(DIRECTORY) otherwise applies its
+# default 644 and strips the execute bit off scripts/build_models.sh -- which
+# fails at the point someone runs it out of the install tree rather than the
+# source checkout, i.e. the documented way.
+install(DIRECTORY scripts
+  DESTINATION share/${PROJECT_NAME}/
+  USE_SOURCE_PERMISSIONS
 )
 
 ################################################################################
