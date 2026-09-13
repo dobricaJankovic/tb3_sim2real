@@ -24,8 +24,9 @@ commanded goal. See `docs/history.md` for the run's numbers.
 - `isaac/scripts/tb3_sim.py` (replaces the old `build_scene.py`) is the Isaac Sim
   *simulator launcher*, not a scene-editing helper: it boots Kit, opens the
   stage, builds the ROS 2 OmniGraph, attaches the lidar and calls `play()`.
-  It is the compose default, so `docker compose run --rm isaacsim` starts the
-  simulator the way `gazebo.launch.py` starts gzserver/gzclient. Verified live:
+  Since the 2026-09-13 container merge there is no separate `isaacsim` service:
+  run it inside `tb3_ros` with `isaacsim-python /scripts/tb3_sim.py`, which goes
+  through `ros-isolate`. Verified live:
   `/clock` 81 Hz, `/odom` 76 Hz, `/tf` 68 Hz, `/joint_states` 60 Hz, all read
   from `tb3_ros` across the container boundary, with `/cmd_vel` subscribed.
 - `/cmd_vel` drives the robot for real, not just in principle: commanding
@@ -127,3 +128,63 @@ Still open, and unchanged by this work:
   reports no-return as `-1.0` (228 rays) where Gazebo uses `inf` (36 rays).
   Authoring a real LDS scan pattern is still the fix.
 - `nav:=true` still requires a map that does not exist yet.
+
+## One container (2026-09-13)
+
+Isaac Sim and ROS 2 Humble now run in a single Ubuntu 22.04 image. The
+September conclusion that this was impossible was measured on a locally built
+Isaac Sim; NVIDIA's release is compiled to `GLIBC_2.34` and runs on jammy. See
+`docs/architecture.md` and the `docs/history.md` entries for 2026-09-13.
+
+Verified on branch `isaacsim-humble-single`:
+
+- `docker/isaacsim-ros2/verify.sh isaacsim6-humble:ngc` — **5/5**, including
+  Kit starting and the bridge publishing `/clock` to the system Humble in the
+  same container.
+- `tb3_sim.py` unmodified in the merged image, headless: `/scan` 6.03 Hz,
+  `/odom` 34.1 Hz, `/joint_states` 38.5 Hz, `/clock` 37.8 Hz, tf
+  `odom->base_footprint`, `/cmd_vel` subscribed, no errors.
+- Cache volumes: `/scan` ready 164-168 s cold, **14 s warm**.
+
+### Check these before writing `turtlebot3_isaacsim`
+
+Ordered by how much they would change the package if they fail.
+
+1. **`bringup.launch.py backend:=isaacsim` still works in one container.**
+   Asserted in commit `776bf55`, not tested. Attaching over DDS should be
+   unaffected by both endpoints sharing a container, but "should" is what
+   produced the 3/5 conclusion in September. This is the property that makes
+   the merge safely revertible, so it goes first.
+2. **The Isaac Sim GUI has never been run in the merged image.** Every test so
+   far was `--headless`. The whole point of the change is that you launch
+   bringup and *watch* the simulator come up, so X11 into this image — one
+   cookie at `/root/.Xauthority` now, not two — is load-bearing and unproven.
+   Run `./docker/x11-auth.sh` first.
+3. **`backend:=gazebo` in the merged image.** Gazebo Classic and Isaac Sim now
+   share one container, one GPU and one X display; nothing has asked them to
+   before. Gazebo was working end-to-end before the merge, so a regression here
+   is a merge problem, not a Gazebo problem.
+4. **Shared-memory DDS.** Drop `FASTRTPS_DEFAULT_PROFILES_FILE` and the
+   `docker/fastdds_udp_only.xml` mount and confirm data still flows. The reason
+   for UDP-only — Fast-DDS's 0700 segments across uid 1234 and root — is gone
+   with the merge. Its own commit, so a failure is unambiguous.
+5. **Decide `exec` vs `run --rm` as the documented path.** The warm cache lives
+   in named volumes, so `docker compose run --rm tb3_ros` gets the same 14 s
+   start *and* runs the entrypoint, avoiding the silent-failure trap where
+   `exec` leaves no `ros2` on `PATH` in a non-interactive shell. `up -d` +
+   `exec` only buys attached shells.
+
+### Then the package
+
+`turtlebot3_isaacsim`, mirroring `turtlebot3_gazebo` file for file, built on
+NVIDIA's `isaacsim_bringup` (`IsaacSim-ros_workspaces/humble_ws/src/`), which is
+already "a `ros2 launch` that starts Isaac Sim" and takes
+`standalone:=<script.py>`. It reads the world registry rather than carrying its
+own worlds, which is what finally makes `world:=` a real launch argument for the
+Isaac backend.
+
+Decided 2026-09-13: the package stands alone, and a convenience layer that
+imports it alongside `turtlebot3_gazebo` comes later. Whether `tb3_bringup`
+becomes that layer or is replaced by it is deliberately left open.
+
+Design note: <https://claude.ai/code/artifact/e83a0463-ff46-4f38-b227-c025cd4b5a7e>
