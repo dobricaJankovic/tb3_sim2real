@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+#
+# Run a command with the system ROS 2 installation removed from the environment.
+#
+# Isaac Sim bundles its own Python interpreter and its own build of the ROS 2
+# client libraries. Its setup_python_env.sh *appends* to PYTHONPATH and
+# LD_LIBRARY_PATH:
+#
+#     export PYTHONPATH=$PYTHONPATH:$SCRIPT_DIR/kit/python/lib/python3.12:...
+#     export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$SCRIPT_DIR/...
+#
+# so whatever the system installation put there stays ahead of Kit's own entries
+# and wins the search. Kit then loads modules and shared objects built for the
+# system interpreter and aborts.
+#
+# Removing the ROS 2 prefixes from the three search paths is enough. The ROS 2
+# bridge locates its client libraries through ROS_DISTRO and the internal
+# library directory set below, and the settings that decide which DDS domain the
+# simulator joins -- ROS_DOMAIN_ID, RMW_IMPLEMENTATION, ROS_LOCALHOST_ONLY,
+# FASTRTPS_DEFAULT_PROFILES_FILE -- are deliberately left untouched, so the
+# simulator stays reachable from the rest of the system.
+#
+#     ros-isolate /isaac-sim/isaac-sim.sh
+#     ros-isolate /isaac-sim/python.sh my_script.py
+#
+set -euo pipefail
+
+if [ "$#" -eq 0 ]; then
+    echo "usage: ros-isolate COMMAND [ARG...]" >&2
+    exit 2
+fi
+
+# Every prefix that belongs to a ROS 2 installation: the distribution itself,
+# plus any overlay workspaces the caller has sourced on top of it.
+ros_prefixes=("/opt/ros")
+IFS=':' read -ra _ament <<<"${AMENT_PREFIX_PATH-}"
+for _prefix in "${_ament[@]-}"; do
+    [ -n "$_prefix" ] && ros_prefixes+=("$_prefix")
+done
+
+# Echo a colon-separated search path with every ROS 2 entry dropped.
+strip_ros_prefixes() {
+    local entry prefix keep result=()
+    IFS=':' read -ra _entries <<<"${1-}"
+    for entry in "${_entries[@]-}"; do
+        [ -n "$entry" ] || continue
+        keep=yes
+        for prefix in "${ros_prefixes[@]}"; do
+            case "$entry" in
+                "$prefix"|"$prefix"/*) keep=no; break ;;
+            esac
+        done
+        [ "$keep" = yes ] && result+=("$entry")
+    done
+    local IFS=':'
+    echo "${result[*]-}"
+}
+
+# An empty search path is not the same as an unset one -- an empty PYTHONPATH
+# entry puts the working directory on the import path -- so drop the variable
+# entirely when nothing survives. PATH is exempt: an unset PATH would leave the
+# shell unable to resolve the command being wrapped.
+for _var in PYTHONPATH LD_LIBRARY_PATH; do
+    _stripped="$(strip_ros_prefixes "${!_var-}")"
+    if [ -n "$_stripped" ]; then
+        export "$_var=$_stripped"
+    else
+        unset "$_var"
+    fi
+done
+export PATH="$(strip_ros_prefixes "$PATH")"
+: "${PATH:=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
+
+# Package discovery variables, meaningful only to the system installation.
+unset AMENT_PREFIX_PATH AMENT_CURRENT_PREFIX COLCON_PREFIX_PATH CMAKE_PREFIX_PATH
+
+# Point the ROS 2 bridge at the client libraries shipped inside Isaac Sim.
+export ROS_DISTRO="${ISAACSIM_ROS_DISTRO:?ISAACSIM_ROS_DISTRO is not set}"
+_internal_libs="${ISAACSIM_PATH:-/isaac-sim}/exts/isaacsim.ros2.core/${ROS_DISTRO}/lib"
+if [ ! -d "$_internal_libs" ]; then
+    echo "ros-isolate: no bundled ROS 2 libraries at $_internal_libs" >&2
+    exit 1
+fi
+export LD_LIBRARY_PATH="$_internal_libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+exec "$@"

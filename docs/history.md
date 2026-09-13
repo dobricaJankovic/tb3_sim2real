@@ -553,3 +553,55 @@ past six minutes, which read as a deadlock in the code being tested. Check
 no teleop, nothing publishing `/cmd_vel`: `/odom` position moved 3.4e-11 m over
 ten seconds, and `/odom` twist sat at ~1e-5 m/s and ~1e-3 rad/s — numerical
 noise. `check_surfaces()` passed on the regenerated stage without comment.
+
+## 2026-09-13 — A locally built Isaac Sim retired a design on a fact that was not true
+
+**Problem — "Isaac Sim cannot run on Ubuntu 22.04" was measured on the wrong
+binaries.** On 2026-09-06 the single-container design was built, tested and
+rejected: `verify.sh` scored `isaacsim6-humble` 3/5 because nine of 1104 shared
+objects under `/isaac-sim/exts` needed `GLIBC_2.38` against jammy's 2.35, three
+of them the ROS 2 bridge. `docs/architecture.md` recorded it as a property of
+Isaac Sim. It was a property of the *build host*: the image under test,
+`isaac-sim-docker:latest`, came from a local build of `~/isaacsim-6.0` compiled
+on this noble machine. NVIDIA's released tarball is compiled to a lower floor —
+across all 3189 shared objects in `isaac-sim-standalone-6.0.0-linux-x86_64` the
+ceiling is `GLIBC_2.35`, exactly jammy, with the three bridge libraries at 2.34.
+That floor is what the Isaac Sim README means by "Ubuntu 22.04/24.04".
+
+**Fix — swap only the binaries, and the 3/5 becomes a pass.** Mounting the
+official tree over `isaacsim6-humble:latest` with `ISAACSIM_PATH` pointed at it,
+same jammy, same ROS, same `ros-isolate`: `isaacsim.ros2.core`, `.nodes` and
+`.bridge` all started, and `ros2 topic echo /clock` from the system Humble in
+the *same container* returned sim time. Second run on a writable tree: no errors
+at all.
+
+**Concept — mount a vendor tree read-only and Kit degrades quietly.** The first
+run logged `HydraEngine rtx failed creating scene renderer`, `Cannot find
+Documents/Kit/shared`, and `Python node cache update ... Aborting Python node
+registration` — all caused by `:ro` on `/isaac-sim`, all gone on a writable
+mount. The clock graph still worked because its nodes are C++; a graph using
+Python-backed OGN nodes would have failed instead, and nothing would have said
+why. Whatever ships must keep `/isaac-sim` writable.
+
+**Concept — Isaac Sim 6 probes for *your* rclpy before using its own.** The
+startup line `Attempting to load system rclpy` is not a warning sign; it is the
+`use_internal_libs:=false` / `ros_installation_path:=` feature looking for a
+user ROS install. We cannot take that branch — Kit is Python 3.12, Humble's
+`rclpy` is `cpython-310` — so it falls back to the internal Humble build, which
+is the default and what we want. The corollary: if custom message types ever
+need to exist inside Kit, `IsaacSim-ros_workspaces`'
+`ubuntu_22_humble_python_312_minimal.dockerfile` is the mechanism, because it
+rebuilds Humble against 3.12 so `ros_installation_path` can point at it. That is
+what that repo is *for*; it does not build a ROS userland you can `ros2 launch`
+from.
+
+**Concept — `nvcr.io/nvidia/isaac-sim` is not anonymously pullable.** NGC issues
+an anonymous token but returns 401 on the manifest: it needs `docker login
+nvcr.io` plus a one-time licence acceptance in a browser for the same NGC org.
+The `docker/isaacsim-ros2/` Dockerfiles now default `ISAACSIM_IMAGE` to that
+release anyway, with a documented escape hatch for wrapping an on-disk tree,
+because the alternative — depending on whatever is tagged `isaac-sim-docker:latest`
+on one machine — is what caused the error at the top of this entry.
+
+**Design note.** The `turtlebot3_isaacsim` proposal that follows from this:
+<https://claude.ai/code/artifact/e83a0463-ff46-4f38-b227-c025cd4b5a7e>

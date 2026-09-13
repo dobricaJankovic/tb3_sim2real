@@ -1,0 +1,157 @@
+# Isaac Sim 6.0 and ROS 2 Humble in a single Ubuntu 22.04 image.
+#
+# NVIDIA ships Isaac Sim on Ubuntu 24.04, where ROS 2 Humble has no binary
+# packages, so the two are normally run in separate containers that meet only on
+# the DDS wire. That split is not actually required: Isaac Sim supports Ubuntu
+# 22.04 (see the Isaac Sim README, "Operating System: Windows 11 or Linux
+# (Ubuntu 22.04/24.04)"), its Kit binaries are built against glibc 2.34 or older
+# while Jammy provides 2.35, and everything the upstream Dockerfile installs
+# from apt is available on Jammy as well.
+#
+# The two Python installations never meet. Kit runs the interpreter bundled at
+# /isaac-sim/kit/python, ROS 2 runs the system interpreter, and the ros-isolate
+# wrapper keeps the system installation out of Kit's search paths. This is a
+# different arrangement from the one in NVIDIA's IsaacSim-ros_workspaces
+# repository, which rebuilds a minimal ROS 2 from source against Python 3.12 so
+# that rclpy can be imported inside Kit. Nothing here needs that: the ROS 2
+# bridge is C++ and talks to the rest of the system over DDS.
+#
+#   docker build -f Dockerfile.humble -t isaacsim6-humble:latest .
+#
+#   docker run --rm -it --gpus all --network host --ipc host \
+#       -e ACCEPT_EULA=Y -e PRIVACY_CONSENT=Y \
+#       isaacsim6-humble:latest
+#
+# Then, inside the container, `isaacsim` for the simulator and the usual ros2
+# tooling for everything else.
+
+# Where Isaac Sim comes from, and the single most consequential line in this
+# file. NVIDIA's NGC *release*, not a locally built isaac-sim-docker:latest:
+# the two are not the same binaries, and the difference decides whether this
+# image works at all.
+#
+# A local build of ~/isaacsim-6.0 is compiled against the build host's glibc.
+# Done on noble that yields nine shared objects under exts/ requiring
+# GLIBC_2.38 -- three of them the ROS 2 bridge -- which jammy's 2.35 cannot
+# satisfy, and the bridge silently fails to load. That is what scored this
+# image 3/5 on 2026-09-06 and produced the wrong conclusion that Isaac Sim
+# cannot run on 22.04 at all.
+#
+# NVIDIA's released build is compiled to a lower floor on purpose: across all
+# 3189 shared objects in isaac-sim-standalone-6.0.0-linux-x86_64 the ceiling is
+# GLIBC_2.35, exactly jammy, and the three bridge libraries are at 2.34. That
+# is what "Ubuntu 22.04/24.04" in the Isaac Sim README buys.
+#
+# Pulling this needs `docker login nvcr.io` once, plus accepting the licence in
+# a browser for the same NGC org. To build against an Isaac Sim tree you
+# already have on disk instead, wrap it in a trivial image and point here:
+#
+#   printf 'FROM scratch\nCOPY . /isaac-sim\n' > /tmp/isaac.Dockerfile
+#   docker build -t isaac-sim-local:6.0.0 -f /tmp/isaac.Dockerfile \
+#       ~/Downloads/isaac-sim-standalone-6.0.0-linux-x86_64
+#   docker build --build-arg ISAACSIM_IMAGE=isaac-sim-local:6.0.0 ...
+#
+# Whatever it points at must be a RELEASE tree. Check before trusting it:
+#   objdump -T <lib> | grep -o 'GLIBC_2\.[0-9]*' | sort -uV | tail -1
+ARG ISAACSIM_IMAGE=nvcr.io/nvidia/isaac-sim:6.0.1
+ARG BASE_IMAGE=ros:humble-ros-base
+
+FROM ${ISAACSIM_IMAGE} AS isaacsim
+
+FROM ${BASE_IMAGE}
+
+LABEL org.opencontainers.image.title="Isaac Sim 6.0 + ROS 2 Humble"
+LABEL org.opencontainers.image.description="NVIDIA Isaac Sim 6.0 and ROS 2 Humble in one Ubuntu 22.04 image."
+LABEL org.opencontainers.image.base.name="docker.io/library/ros:humble-ros-base"
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# --- ROS 2 ------------------------------------------------------------------
+# Desktop for RViz and the standard message packages, Nav2 as the navigation
+# stack, and both simulators that ROS 2 Humble supports: Gazebo Classic 11,
+# which most of the Humble ecosystem still targets, and Gazebo Fortress, the
+# pairing named by REP-2000.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ros-${ROS_DISTRO}-desktop \
+        ros-${ROS_DISTRO}-navigation2 \
+        ros-${ROS_DISTRO}-nav2-bringup \
+        ros-${ROS_DISTRO}-gazebo-ros-pkgs \
+        ros-${ROS_DISTRO}-gazebo-ros2-control \
+        ros-${ROS_DISTRO}-ros-gz \
+        ros-${ROS_DISTRO}-xacro \
+        ros-${ROS_DISTRO}-tf2-tools \
+        ros-${ROS_DISTRO}-pointcloud-to-laserscan \
+        python3-colcon-common-extensions \
+        python3-vcstool \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- Isaac Sim runtime dependencies -----------------------------------------
+# The set installed by NVIDIA's own Dockerfile, plus the Vulkan loader, which
+# their base image already provides and Ubuntu's does not.
+RUN touch /etc/ld.so.nohwcap \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        gpgv \
+        libatomic1 \
+        libegl1 \
+        libgl1 \
+        libglu1-mesa \
+        libglvnd0 \
+        libglx0 \
+        libgomp1 \
+        libnghttp2-14 \
+        libsm6 \
+        libvulkan1 \
+        libxi6 \
+        libxrandr2 \
+        libxt6 \
+        unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- GPU driver discovery ---------------------------------------------------
+# Reproduced from NVIDIA's Isaac Sim Dockerfile. These tell the GLVND and Vulkan
+# loaders where the driver injected by the NVIDIA container runtime lives; they
+# are not display or X11 configuration.
+RUN mkdir -p /usr/share/glvnd/egl_vendor.d /etc/vulkan/icd.d /etc/vulkan/implicit_layer.d \
+    && printf '{\n    "file_format_version" : "1.0.0",\n    "ICD" : {\n        "library_path" : "libEGL_nvidia.so.0"\n    }\n}\n' \
+        > /usr/share/glvnd/egl_vendor.d/10_nvidia.json \
+    && printf '{\n    "file_format_version" : "1.0.0",\n    "ICD" : {\n        "library_path" : "libEGL_mesa.so.0"\n    }\n}\n' \
+        > /usr/share/glvnd/egl_vendor.d/50_mesa.json \
+    && printf '{\n    "file_format_version" : "1.0.0",\n    "ICD" : {\n        "library_path" : "libGLX_nvidia.so.0",\n        "api_version" : "1.3.194"\n    }\n}\n' \
+        > /etc/vulkan/icd.d/nvidia_icd.json \
+    && printf '{\n    "file_format_version" : "1.0.0",\n    "layer": {\n        "name": "VK_LAYER_NV_optimus",\n        "type": "INSTANCE",\n        "library_path": "libGLX_nvidia.so.0",\n        "api_version" : "1.3.194",\n        "implementation_version" : "1",\n        "description" : "NVIDIA Optimus layer",\n        "functions": {\n            "vkGetInstanceProcAddr": "vk_optimusGetInstanceProcAddr",\n            "vkGetDeviceProcAddr": "vk_optimusGetDeviceProcAddr"\n        },\n        "enable_environment": {\n            "__NV_PRIME_RENDER_OFFLOAD": "1"\n        },\n        "disable_environment": {\n            "DISABLE_LAYER_NV_OPTIMUS_1": ""\n        }\n    }\n}\n' \
+        > /etc/vulkan/implicit_layer.d/nvidia_layers.json
+
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=all
+ENV VK_DRIVER_FILES=/etc/vulkan/icd.d/nvidia_icd.json
+ENV MIN_DRIVER_VERSION=570.169
+
+# --- Isaac Sim --------------------------------------------------------------
+# Isaac Sim is a self-contained tree: its own interpreter, its own libraries and
+# its own build of the ROS 2 client libraries for both Humble and Jazzy. Unlike
+# NVIDIA's image this one runs as root, matching the ROS 2 images and letting
+# both stacks share Fast DDS shared memory segments.
+COPY --from=isaacsim --chown=root:root /isaac-sim /isaac-sim
+
+ENV ISAACSIM_PATH=/isaac-sim
+ENV ISAACSIM_ROS_DISTRO=humble
+
+# ros-isolate removes the system ROS 2 installation from the environment before
+# handing over to Kit; see the comments in the script for why that is needed.
+COPY ros-isolate /usr/local/bin/ros-isolate
+RUN chmod 0755 /usr/local/bin/ros-isolate \
+    && printf '#!/bin/sh\nexec ros-isolate "%s/isaac-sim.sh" "$@"\n' "${ISAACSIM_PATH}" \
+        > /usr/local/bin/isaacsim \
+    && printf '#!/bin/sh\nexec ros-isolate "%s/python.sh" "$@"\n' "${ISAACSIM_PATH}" \
+        > /usr/local/bin/isaacsim-python \
+    && printf '#!/bin/sh\nexec ros-isolate "%s/runheadless.sh" "$@"\n' "${ISAACSIM_PATH}" \
+        > /usr/local/bin/isaacsim-headless \
+    && chmod 0755 /usr/local/bin/isaacsim /usr/local/bin/isaacsim-python /usr/local/bin/isaacsim-headless
+
+WORKDIR /isaac-sim
+
+# ENTRYPOINT and CMD are inherited from the ROS 2 base image: ros_entrypoint.sh
+# sources the distribution and execs the command, so `ros2` works out of the box
+# and `isaacsim` still gets a clean environment.

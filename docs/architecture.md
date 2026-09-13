@@ -7,47 +7,84 @@ runs the simulator using the ROS 2 Humble libraries bundled inside
 ROS: Nav2, RViz, `robot_state_publisher`, Gazebo, the real-robot drivers, and
 this package. They only ever meet on the DDS wire.
 
-**The Python 3.10 / 3.12 split is not a problem.** It would only matter if ROS 2
-Python code had to run *inside* Kit's interpreter. It doesn't — Isaac Sim's
-OmniGraph ROS 2 nodes are C++ against bundled libs that include
-`libfastrtps.so.2.6.10`, the same Fast-DDS version stock Humble ships. Same RTPS,
-same Humble message definitions.
+**The Python 3.10 / 3.12 split is not a problem.** Not because ROS 2 Python
+stays out of Kit — it does not. `isaacsim.ros2.core` loads an `rclpy` during
+startup, and the logs say so:
+
+    Attempting to load system rclpy
+    Could not import system rclpy: No module named 'rclpy'
+    Attempting to load internal rclpy for ROS Distro: humble
+    rclpy loaded
+
+Isaac Sim 6 added the option to use *your* ROS installation inside Kit
+(`use_internal_libs:=false` plus `ros_installation_path:=`), so it probes for a
+system `rclpy` first. We cannot take that branch and do not want to: Kit runs
+Python 3.12 and Humble's `rclpy` is a `cpython-310` extension module. The
+fallback to the internal Humble build — rebuilt by NVIDIA against 3.12 — is the
+supported path, and `use_internal_libs:=true` is its default. The OmniGraph
+nodes themselves are C++ against bundled libs that include
+`libfastrtps.so.2.6.10`, the same Fast-DDS version stock Humble ships. Same
+RTPS, same Humble message definitions.
+
+If we ever need custom message types or our own Python nodes running *inside*
+Kit, that is what `IsaacSim-ros_workspaces`' `ubuntu_22_humble_python_312`
+dockerfile exists for: it rebuilds Humble against 3.12 so
+`ros_installation_path` can point at it. Nothing in the interface contract
+below needs it.
 
 Full write-up: <https://claude.ai/code/artifact/f7809bfe-4918-4977-938c-e008f28c46e3>
 
-## Why not one container
+## One container or two
 
-Tested on 2026-09-06 rather than assumed; both images were built and run. The
-work is on the `isaacsim-ros2-single-container` branch and the evidence is
-written up at
-<https://claude.ai/code/artifact/6a079cb9-a3bf-4c3f-bb70-06e37f1d4e96>.
+Two containers is what the repo does today. The reason recorded here for it was
+wrong, and the way it was wrong is the part worth keeping.
 
-The Python 3.10 / 3.12 difference is *not* what prevents it — see above, and Kit
-bundles its own interpreter anyway. Two things do:
+Tested on 2026-09-06: both combined images built, `verify.sh` scored
+`isaacsim6-jazzy` 5/5 and `isaacsim6-humble` 3/5. Nine of 1104 shared objects
+under `/isaac-sim/exts` required `GLIBC_2.38`, which only noble provides, and
+three of those nine were the bridge — `libisaacsim.ros2.core.humble.so`,
+`libisaacsim.ros2.core.jazzy.so`, `libisaacsim.ros2.nodes.plugin.so`. This
+document concluded that on 22.04 Isaac Sim "cannot work with NVIDIA's
+binaries."
 
-1. **On 22.04 it cannot work with NVIDIA's binaries.** Kit itself is portable,
-   and so are 1095 of the 1104 shared objects under `/isaac-sim/exts`. Nine
-   require `GLIBC_2.38`, which only noble provides, and three of those nine are
-   the bridge: `libisaacsim.ros2.core.humble.so`, `libisaacsim.ros2.core.jazzy.so`
-   and `libisaacsim.ros2.nodes.plugin.so`. Both bundled distros fail identically,
-   so this is NVIDIA's build host, not a Humble/Jazzy question.
-2. **Where it *would* work, it is still the wrong trade.** Building Isaac Sim
-   from source on jammy would fix the nine, and the same image on noble/Jazzy
-   already passes end to end — so this is a choice, not a limit. It means owning
-   an unofficial build of the simulator, redone on every Isaac Sim release, on a
-   configuration NVIDIA does not ship. Prefer the official artifact.
+Those were not NVIDIA's binaries. The image under test, `isaac-sim-docker:latest`,
+was built locally from `~/isaacsim-6.0` on *this noble host*, against its glibc
+2.39. The conclusion was about the build host, not about Isaac Sim.
 
-The simplification on offer is also smaller than it looks. Merging does not
-remove the interpreter problem: Isaac Sim's `setup_python_env.sh` *appends* to
-`PYTHONPATH`/`LD_LIBRARY_PATH`, so a sourced ROS 2 stays ahead of Kit's own
-entries and Kit loads the wrong modules. A merged container needs a wrapper
-stripping `/opt/ros` back out on every launch. And the two real wins — shared
-memory DDS instead of UDP loopback, one X11 cookie path instead of two — come
-from the images running as *different uids* (1234 vs root), not from being
-separate containers. Aligning the uids gets both without touching this design.
+Re-measured on 2026-09-13 against the shipped release: across all 3189 shared
+objects in `isaac-sim-standalone-6.0.0-linux-x86_64` the ceiling is
+`GLIBC_2.35` — exactly jammy — and the three bridge libraries are at 2.34. That
+floor is deliberate; it is what Isaac Sim's README means by "Operating System:
+Windows 11 or Linux (Ubuntu 22.04/24.04)".
 
-Note that a single-command launch never required a single container; that goal
-is reachable across the container boundary.
+Confirmed end to end the same day, changing only the binaries: the official tree
+mounted over `isaacsim6-humble:latest` with `ISAACSIM_PATH` pointed at it,
+`isaacsim.ros2.core` / `.nodes` / `.bridge` all started, and
+`ros2 topic echo /clock` from the system Humble **in the same container**
+returned sim time. A second run against a writable tree logged no errors at all;
+the RTX and Python-node-registration complaints in the first were artifacts of
+a read-only mount.
+
+So one Ubuntu 22.04 container — official ROS 2 Humble plus the official Isaac
+Sim release — is supported ground, and every part stays a vendor artifact. That
+was the standard the 2026-09-06 decision was made against, so the decision is
+reopened. Design note:
+<https://claude.ai/code/artifact/e83a0463-ff46-4f38-b227-c025cd4b5a7e>
+
+What survives from the earlier write-up regardless:
+
+- **`ros-isolate` is still needed.** Isaac Sim's `setup_python_env.sh` *appends*
+  to `PYTHONPATH`/`LD_LIBRARY_PATH`, so a sourced ROS 2 stays ahead of Kit's own
+  entries. This is not a workaround: NVIDIA's own `isaacsim_bringup` launcher
+  strips the same three variables when `use_internal_libs` is true.
+- **A single-command launch never required a single container.**
+- **The real wins of merging come from one uid, not from one container.** The
+  1234-vs-root split is what forced UDP-only Fast-DDS and two X cookie paths.
+  `ipc: host` must stay off either way — that was carb's PID-named segment.
+
+The standing lesson: a locally built vendor artifact is not the vendor's
+artifact, and measuring the wrong one can retire a design on a fact that is not
+true.
 
 ## Layout
 
