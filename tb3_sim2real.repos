@@ -17,26 +17,16 @@ repositories:
   # holds eight other example packages, twice over (humble_ws and jazzy_ws).
   # scripts/workspace.sh drops a COLCON_IGNORE in every one except our distro's
   # isaacsim_bringup, which is the only thing we use: turtlebot3_isaacsim
-  # includes its run_isaacsim.launch.py to put Kit behind a `ros2 launch`.
+  # includes its run_isaacsim.launch.xml to put Kit behind a `ros2 launch`.
   #
-  # PINNED TO 6.0.1 DELIBERATELY, while Isaac Sim itself is 6.1.0.
-  #
-  # The IsaacSim-6.1.0 tag reimplements run_isaacsim.launch.py as
-  # run_isaacsim.launch.xml -- argument for argument the same file, but a
-  # different name and a different source type, so a PythonLaunchDescriptionSource
-  # pointed at the old name dies with a bare ENOENT. turtlebot3_isaacsim
-  # includes it by that name and was verified against this revision.
-  #
-  # The mismatch is not a runtime one: turtlebot3_isaacsim passes
-  # install_path=/isaac-sim explicitly, and install_path overrides the launcher's
-  # own `version` default, so the 6.0.1 launcher starts the 6.1.0 install that
-  # is actually on disk. That is the combination its README records as run
-  # against a GPU.
-  #
-  # Moving to the 6.1.0 tag is a two-line change in turtlebot3_isaacsim --
-  # AnyLaunchDescriptionSource and the new filename -- and belongs in that
-  # repository, not in a patch applied from here.
+  # Pinned to the tag that matches the installed Isaac Sim, 6.1.0. This was
+  # 6.0.1 until 2026-09-15, because the 6.1.0 tag migrated every repo-owned
+  # launch file from Python to XML -- run_isaacsim.launch.py became
+  # run_isaacsim.launch.xml -- and turtlebot3_isaacsim still included the old
+  # name with a PythonLaunchDescriptionSource, which dies with a bare ENOENT.
+  # That is now fixed at the source, in turtlebot3_isaacsim, with
+  # AnyLaunchDescriptionSource and the new filename, so the two versions agree.
   IsaacSim-ros_workspaces:
     type: git
     url: https://github.com/isaac-sim/IsaacSim-ros_workspaces.git
-    version: IsaacSim-6.0.1
+    version: IsaacSim-6.1.0
