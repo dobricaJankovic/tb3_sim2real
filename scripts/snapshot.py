@@ -32,6 +32,8 @@ ap.add_argument('--world', required=True)
 ap.add_argument('--out', default='')
 ap.add_argument('--width', type=int, default=1280)
 ap.add_argument('--height', type=int, default=720)
+ap.add_argument('--key-light', type=float, default=600.0)
+ap.add_argument('--fill-light', type=float, default=120.0)
 ap.add_argument('--frames', type=int, default=120,
                 help='render iterations before capture; RTX needs to converge')
 args = ap.parse_args()
@@ -62,10 +64,16 @@ def main():
 
     if not any(p.IsA(UsdLux.BoundableLightBase) or p.IsA(UsdLux.NonboundableLightBase)
                for p in stage.Traverse()):
-        UsdLux.DistantLight.Define(stage, '/World/SnapshotKey') \
-            .CreateIntensityAttr(3000)
+        # Modest intensities on purpose. The first version of this used 3000
+        # and 700 and overexposed the whole stage: every diffuse colour washed
+        # toward white, so the snapshot said "no materials" about a stage whose
+        # bindings were all correct — the very failure it exists to detect.
+        key = UsdLux.DistantLight.Define(stage, '/World/SnapshotKey')
+        key.CreateIntensityAttr(args.key_light)
+        key.CreateAngleAttr(2.0)
+        UsdGeom.XformCommonAPI(key).SetRotate(Gf.Vec3f(-50.0, 0.0, 35.0))
         UsdLux.DomeLight.Define(stage, '/World/SnapshotFill') \
-            .CreateIntensityAttr(700)
+            .CreateIntensityAttr(args.fill_light)
 
     # Frame the stage from its own bounding box, so this works on any world
     # without a per-world camera pose to keep in step with the geometry.

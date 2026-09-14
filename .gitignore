@@ -37,3 +37,7 @@ docker-compose.override.yml
 
 # editor
 .vscode/
+
+# Snapshot renders are build products, like the USD.
+worlds/*/gazebo_snapshot.*
+worlds/*/isaac/snapshot.png
