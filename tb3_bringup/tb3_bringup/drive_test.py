@@ -21,6 +21,7 @@ import rclpy
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
+from rclpy.parameter import Parameter
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 
 # name, linear.x (m/s), angular.z (rad/s), seconds.
@@ -98,7 +99,33 @@ class DriveTest(Node):
         return dict(t=self._now(), x=p.position.x, y=p.position.y,
                     yaw=yaw_of(p.orientation), vx=t.linear.x, wz=t.angular.z)
 
-    def wait_for_odom(self, timeout=120.0):
+    def adopt_sim_time(self, timeout=180.0):
+        """Time phases on the SIMULATOR's clock when there is one.
+
+        `ros2 run` does not set use_sim_time, so without this the phases are
+        timed on the wall clock while the robot moves in sim time. Gazebo at a
+        real-time factor near 1.0 hides that completely; Isaac Sim with RTX does
+        not, and every phase comes out short by exactly the real-time factor —
+        which reads as a large kinematic error and is nothing of the kind.
+
+        Detected rather than declared, so the instrument stays one command on
+        all three backends: the real robot publishes no /clock and keeps wall
+        time, which is correct for it.
+        """
+        deadline = time.time() + timeout
+        while rclpy.ok() and time.time() < deadline:
+            rclpy.spin_once(self, timeout_sec=0.1)
+            if self.count_publishers('/clock'):
+                self.set_parameters(
+                    [Parameter('use_sim_time', Parameter.Type.BOOL, True)])
+                self.get_logger().info('/clock found; timing on simulated time')
+                return True
+            if time.time() > deadline - timeout + 5.0:
+                break
+        self.get_logger().info('no /clock; timing on wall time')
+        return False
+
+    def wait_for_odom(self, timeout=180.0):
         deadline = time.time() + timeout
         while rclpy.ok() and self.odom is None and time.time() < deadline:
             rclpy.spin_once(self, timeout_sec=0.1)
@@ -110,6 +137,7 @@ class DriveTest(Node):
         self.get_logger().info('odom up; starting sequence')
 
     def run(self):
+        self.sim_time = self.adopt_sim_time()
         self.wait_for_odom()
         results = []
         for name, lin, ang, secs in self.sequence:
@@ -118,7 +146,10 @@ class DriveTest(Node):
             start = self._pose()
             t0 = start['t']
             phase = [start]
-            while rclpy.ok() and self._now() - t0 < secs:
+            # Bounded by the wall clock too: a simulator that stalls its own
+            # /clock would otherwise hang the run rather than report anything.
+            wall_stop = time.time() + secs * 20.0 + 30.0
+            while rclpy.ok() and self._now() - t0 < secs and time.time() < wall_stop:
                 self.pub.publish(msg)
                 rclpy.spin_once(self, timeout_sec=1.0 / RATE)
                 phase.append(self._pose())
@@ -131,7 +162,7 @@ class DriveTest(Node):
 
         self.pub.publish(Twist())
         report = {'label': self.label, 'sequence_name': self.sequence_name,
-                  'sequence': results,
+                  'sim_time': self.sim_time, 'sequence': results,
                   'final': self._pose(), 'samples': self.samples}
         if self.out:
             with open(self.out, 'w') as f:
