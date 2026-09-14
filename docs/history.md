@@ -1249,3 +1249,25 @@ sat behind one cache entry that was correct for the wrong reason. Nothing
 errored, `verify` passed, and both simulators agreed. A check that only runs
 against cached work is not a check. The cache now carries a digest of what
 produced it.
+
+### Correction, same day
+
+The lifecycle-manager bringup failure written up above as Kit holding the
+machine was not that. Leftover `ros2 launch` processes from earlier tests were
+still on the DDS domain, so two lifecycle managers were fighting over the same
+nodes. On a restarted container the run is clean: zero errors, both managers
+answering `is_active: True`, `map->odom` at exactly `[-2.000, -0.500]` after one
+`/initialpose`.
+
+Worth keeping for the mechanism rather than the conclusion.
+`pkill -INT -f "ros2 launch"` issued from inside a `docker compose exec -T`
+whose client has already exited does not reach them, and a `pkill -f gzserver`
+placed after it in a subshell that exits first never runs at all. The visible
+symptoms are a doubled `ros2 node list`, a second gzserver dying with exit code
+255 and no message, and lifecycle transitions that "fail" while the nodes
+themselves come up fine. `docker compose restart tb3_ros` is the reliable
+reset, and costs a 1.5 s rebuild of `/ws/install`.
+
+**The measurement lesson is the same one as the mesh cache, one layer up: a
+result taken on a dirty environment is not a result.** Two write-ups today
+blamed the system under test for state the test itself left behind.
