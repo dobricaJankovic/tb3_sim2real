@@ -40,6 +40,17 @@ backends measured from the ROS side in the `tb3_ros` container.
 - **`scripts/clone_world.py`** — round-tripped: the stock `turtlebot3_world`
   map cloned into a world directory scores 100% of the map modelled and 0% of
   the model absent from the map at the burger's 0.182 m beam height.
+- **`nav:=true` on gazebo** — the whole stack up with **zero errors**: `amcl`,
+  `map_server`, `planner_server`, `controller_server`, `behavior_server`,
+  `bt_navigator`. `/map` is 384x384 at 0.05 m, served out of
+  `worlds/turtlebot3_world/map/` rather than the bringup package.
+- **`nav:=true` on isaacsim** — same eight nodes, same map, and publishing one
+  `/initialpose` at the manifest's spawn produced `map->odom` at exactly
+  `[-2.000, -0.500]`. See the caveat below.
+- **`backend:=real`** — `robot_state_publisher`, the LDS driver and
+  `turtlebot3_node` all start and the node fails on
+  `Failed to open the port(/dev/ttyACM0)`, which is the correct failure with no
+  OpenCR attached. That is as far as it goes without hardware.
 - **`colcon build`** — 3 packages: `isaacsim_bringup`, `turtlebot3_isaacsim`,
   `tb3_bringup`.
 
@@ -51,6 +62,26 @@ Sim's `IsaacComputeOdometry` puts `odom` at the robot, so tf reads zero at
 spawn. Both are valid odometry; AMCL resolves the difference into `map->odom`.
 It matters only if you compare raw `/odom` between backends without saying which
 frame you mean.
+
+### Nav2's lifecycle managers report a failed bringup on the Isaac backend
+
+Observed once, on the run above. Both managers logged
+
+    Failed to change state for node: map_server        (localization)
+    Failed to change state for node: controller_server (navigation)
+    Failed to bring up all requested nodes. Aborting bringup.
+
+and yet every managed node reached active: `/map` was served and AMCL published
+`map->odom`. The transitions went through; the managers timed out waiting for
+the replies, because Kit is still loading the stage and holding the machine
+while Nav2 configures. So the nodes work but the managers believe bringup
+failed, which means no bond monitoring and `is_active` answering wrongly.
+
+**A navigation goal has not been driven on the Isaac backend since this was
+seen.** Do not quote it as working end to end until it has. The fix, when it is
+wanted, is `config/nav2_isaacsim.yaml` with a longer lifecycle
+`service_timeout` — which is the first genuine per-backend Nav2 difference this
+project has found, and exactly what that file is for.
 
 ## Known open
 
