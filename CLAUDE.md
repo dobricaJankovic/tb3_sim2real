@@ -1,3 +1,63 @@
+# tb3_sim2real
+
+## What this is
+
+Nav2 on a TurtleBot3 against **three interchangeable backends** — the real
+robot, Gazebo Classic, Isaac Sim — from one launch command. The point of the
+repo is that the three are indistinguishable from the waist up: everything
+above `base_footprint` is one URDF and one `robot_state_publisher`, and the
+only thing a consumer package ever changes is `use_sim_time`.
+
+```bash
+ros2 launch tb3_bringup bringup.launch.py backend:={gazebo|isaacsim|real}
+```
+
+Everything runs in **one container**, `tb3_ros` — Ubuntu 22.04, system ROS 2
+Humble, plus Isaac Sim 6.0 at `/isaac-sim` on Kit's own Python 3.12. `docker
+compose up -d` then `docker compose exec`.
+
+## Layout
+
+```
+tb3_bringup/          the ROS 2 package: launch/bringup.launch.py dispatches on
+                      `backend`; launch/backends/ is the only layer that varies;
+                      launch/common/ (state_publisher, nav2) is identical
+                      everywhere; config/nav2_<backend>.yaml is per-backend tuning
+worlds/<name>/        world registry. world.yaml is the source of truth; the
+                      Gazebo .world and the Isaac .usd are generated from it and
+                      share meshes byte-for-byte. Adding a world is a new
+                      directory, not a code change.
+turtlebot3_isaacsim/  standalone ROS 2 package, a peer of upstream
+                      turtlebot3_gazebo — launch files + OmniGraph scripts that
+                      present the real robot's topic interface from Isaac Sim.
+                      Usable without the rest of this repo.
+isaac/scripts/        tb3_sim.py, the in-repo simulator launcher used by
+                      `backend:=isaacsim` (boots Kit, opens the stage, builds the
+                      graph, play()). Older and more hand-rolled than
+                      turtlebot3_isaacsim/; the two overlap on purpose for now.
+isaac/scenes/         USD stages (gitignored)
+docker/               isaacsim-ros2/ is the generic base (verify.sh scores it);
+                      ros/ adds TurtleBot3 + drivers + workspace -> tb3_ros
+scripts/              host/container helpers, incl. build_images.sh
+```
+
+`backend:=isaacsim` only **attaches** to a running simulator; the world is
+chosen where Kit is started, not on the ROS side.
+
+## Where to look
+
+Read the one doc your task needs, not the set:
+
+- `docs/architecture.md` — why one container, the Python 3.10/3.12 split, the
+  Nav2 interface contract, build order.
+- `docs/setup.md` — getting started, `up -d` + `exec`, where the images come from.
+- `docs/status.md` — what is verified working vs. unstarted. **Start here** if
+  you are about to claim something works.
+- `docs/troubleshooting.md` — failure modes that don't throw errors.
+- `worlds/README.md` — the world registry.
+- `docs/history.md` — append-only session log. See the working agreement below:
+  do not read it for context.
+
 # Working agreements for this repo
 
 - **Search before building.** Before writing anything substantial — a script,
