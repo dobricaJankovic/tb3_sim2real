@@ -6,14 +6,16 @@ Nav2 on a TurtleBot3 against **three interchangeable backends** — the real
 robot, Gazebo Classic, Isaac Sim — from one launch command. The point of the
 repo is that the three are indistinguishable from the waist up: everything
 above `base_footprint` is one URDF and one `robot_state_publisher`, and the
-only thing a consumer package ever changes is `use_sim_time`.
+only thing a consumer package ever changes is `use_sim_time`. The same argument
+one level up is the world registry: one manifest per environment, both
+simulators' representations generated from it.
 
 ```bash
-ros2 launch tb3_bringup bringup.launch.py backend:={gazebo|isaacsim|real}
+ros2 launch tb3_bringup bringup.launch.py backend:={gazebo|isaacsim|real} world:=<name|path>
 ```
 
 Everything runs in **one container**, `tb3_ros` — Ubuntu 22.04, system ROS 2
-Humble, plus Isaac Sim 6.0 at `/isaac-sim` on Kit's own Python 3.12. `docker
+Humble, plus Isaac Sim 6.1 at `/isaac-sim` on Kit's own Python 3.12. `docker
 compose up -d` then `docker compose exec`.
 
 ## Layout
@@ -22,28 +24,33 @@ compose up -d` then `docker compose exec`.
 tb3_bringup/          the ROS 2 package: launch/bringup.launch.py dispatches on
                       `backend`; launch/backends/ is the only layer that varies;
                       launch/common/ (state_publisher, nav2) is identical
-                      everywhere; config/nav2_<backend>.yaml is per-backend tuning
+                      everywhere; tb3_bringup/worlds.py is the registry, read by
+                      the launch files AND the generators
 worlds/<name>/        world registry. world.yaml is the source of truth; the
                       Gazebo .world and the Isaac .usd are generated from it and
                       share meshes byte-for-byte. Adding a world is a new
                       directory, not a code change.
-turtlebot3_isaacsim/  STALE DUPLICATE. Split out on 2026-09-13 to its own repo
-                      at ~/turtlebot3_ws/src/turtlebot3_isaacsim, where it is
-                      developed as a peer of turtlebot3_gazebo and imported from
-                      here. Edit it there, not here; this copy is to be deleted
-                      once the new repo is confirmed.
-isaac/scripts/        tb3_sim.py, the simulator launcher `backend:=isaacsim`
-                      attaches to — boots Kit, opens the stage, builds the ROS 2
-                      OmniGraph, play(). Hand-rolled and older than the split-out
-                      package; this is the one this repo actually runs.
-isaac/scenes/         USD stages (gitignored)
-docker/               isaacsim-ros2/ is the generic base (verify.sh scores it);
-                      ros/ adds TurtleBot3 + drivers + workspace -> tb3_ros
-scripts/              host/container helpers, incl. build_images.sh
+scripts/              workspace.sh (vcs import), build_images.sh,
+                      build_world.py / build_world_usd.py / build_world.sh (the
+                      generators), clone_world.py (a real room's Nav2 map -> a
+                      world), check_worlds.py (the drift check)
+docker/               one thin layer over the base image; the base itself is
+                      NOT here, see below
+src/                  imported source dependencies (gitignored)
 ```
 
-`backend:=isaacsim` only **attaches** to a running simulator; the world is
-chosen where Kit is started, not on the ROS side.
+**The Isaac Sim side is imported, never copied.** `turtlebot3_isaacsim` lives in
+its own repository and is a peer of `turtlebot3_gazebo`; it owns the robot
+asset, the OmniGraph, the lidar profile, the physics materials, the
+occupancy-map builder and the Isaac Sim + ROS 2 base image. `tb3_sim2real.repos`
+pins it, `scripts/workspace.sh` fetches it into `src/`, and `backend:=isaacsim`
+includes its `isaacsim.launch.py`. Edit it *there*. A copy here would be a
+second source of truth for the Isaac backend, which is the thing this repo
+exists to prevent — there was one, and it went four worlds and a whole Isaac Sim
+version stale before it was removed on 2026-09-14.
+
+`backend:=isaacsim` **starts** the simulator; `world:=` selects the environment
+on every backend.
 
 ## Where to look
 
@@ -54,8 +61,10 @@ Read the one doc your task needs, not the set:
 - `docs/setup.md` — getting started, `up -d` + `exec`, where the images come from.
 - `docs/status.md` — what is verified working vs. unstarted. **Start here** if
   you are about to claim something works.
+- `worlds/README.md` — the registry AND the environment-cloning methodology:
+  real room -> Nav2 map -> manifest -> both simulators, and what stops them
+  drifting. This is the architectural core, not a reference appendix.
 - `docs/troubleshooting.md` — failure modes that don't throw errors.
-- `worlds/README.md` — the world registry.
 - `docs/history.md` — append-only session log. See the working agreement below:
   do not read it for context.
 
@@ -68,9 +77,10 @@ Read the one doc your task needs, not the set:
   that no grep would surface. Trust upstream schema and test files (`.ogn`
   definitions, message definitions, `test_*.py`) over upstream prose docs,
   which go stale. This is not a style preference — it is written down because
-  `isaac/scripts/tb3_sim.py` was built from first principles while NVIDIA
-  shipped a fully prewired TurtleBot3 with working ROS 2 graphs, and because
-  the skill docs consulted on the way named node attributes that do not exist.
+  this repo's own Isaac Sim launcher was built from first principles while
+  NVIDIA shipped a fully prewired TurtleBot3 with working ROS 2 graphs, and
+  because the skill docs consulted on the way named node attributes that do not
+  exist.
 - **Get the bigger picture before executing.** Push back on a narrow
   instruction until the goal behind it is clear: what it is being built
   toward, what already exists, and how far the change should reach. State the

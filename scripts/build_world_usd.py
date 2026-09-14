@@ -60,7 +60,7 @@ from tb3_bringup import worlds  # noqa: E402
 from isaacsim import SimulationApp
 
 # Headless is correct here: this produces an asset and renders nothing. (Note
-# the contrast with tb3_sim.py, where --headless silently kills the RTX lidar.)
+# the contrast with the simulator, where the RTX lidar needs a real render path.)
 sim_app = SimulationApp({'headless': True})
 
 import omni.kit.asset_converter  # noqa: E402
@@ -84,7 +84,7 @@ async def _convert(src, dst):
     ctx.ignore_materials = False
     ctx.ignore_animation = True
     ctx.ignore_cameras = True
-    # Label the converted stage Z-up. Measured behaviour (isaac/scripts probe,
+    # Label the converted stage Z-up. Measured behaviour (probe script,
     # asset_converter 6.0.1): this flag moves NO geometry — bounds are identical
     # with and without it — it only sets the stage's upAxis metadata.
     #
@@ -110,7 +110,7 @@ def out_dir(world_dir):
 
     A dedicated gitignored subdirectory, so everything this container writes as
     root is confined to one place and the manifest and meshes keep normal
-    permissions. scripts/build_world_usd.sh creates it host-side, which is why
+    permissions. scripts/build_world.sh creates it host-side, which is why
     this only checks.
     """
     d = os.path.join(world_dir, 'isaac')

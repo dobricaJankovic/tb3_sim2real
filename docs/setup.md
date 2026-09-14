@@ -1,30 +1,36 @@
 # Getting started
 
 ```bash
+scripts/workspace.sh                   # source deps into src/ -- do this FIRST
 ./docker/x11-auth.sh                   # once per X session, before any GUI
 scripts/build_images.sh                # base image, then tb3_ros (see below)
 docker compose up -d                   # one container; it stays up
 docker compose exec tb3_ros bash       # terminal 1
 
 # inside tb3_ros:
-scripts/seed_nav2_params.sh            # populate the three placeholder configs
 colcon build --symlink-install && source install/setup.bash
 ros2 launch tb3_bringup bringup.launch.py backend:=gazebo
-```
-
-For Isaac Sim, start the simulator in one terminal and attach the ROS side in
-another — both `exec` into the same container:
-
-```bash
-docker compose exec tb3_ros isaacsim-python /scripts/tb3_sim.py   # terminal 1
-docker compose exec tb3_ros bash                                  # terminal 2
 ros2 launch tb3_bringup bringup.launch.py backend:=isaacsim
 ```
 
-`isaacsim` (GUI) and `isaacsim-python <script>` both go through `ros-isolate`,
-which is the only correct way to start Kit from a shell that has sourced ROS 2.
-Add `--headless` to `tb3_sim.py` if you do not want a window; it roughly doubles
-the lidar rate.
+`scripts/workspace.sh` first, and not only because nothing builds without it:
+the `src/` entries in `docker-compose.yml` are bind mounts, and Docker creates
+a missing host path as an empty root-owned directory rather than failing. Skip
+it and the container comes up with an empty workspace for a reason nothing
+reports. It needs an SSH key with access to the `turtlebot3_isaacsim`
+repository; run it inside the container if your host has no `vcstool`.
+
+**One command starts Isaac Sim.** `backend:=isaacsim` includes
+`turtlebot3_isaacsim`, which includes NVIDIA's `run_isaacsim.launch.py`, so Kit
+comes up behind the same `ros2 launch` as everything else — there is no second
+terminal and no separate simulator to start first. Nav2, when `nav:=true`, is
+held back by an event handler until `/clock` appears, which on a cold shader
+cache is two to three minutes.
+
+`headless:=true` runs it with no window. `isaacsim` (GUI) and
+`isaacsim-python <script>` also exist in the container for one-off work; both go
+through `ros-isolate`, the only correct way to start Kit from a shell that has
+sourced ROS 2.
 
 ## `up -d` + `exec`, not `run --rm`
 
@@ -72,19 +78,29 @@ hz` on a simulated topic needs `--use-sim-time`.
 
 Worlds come from the registry in `worlds/`, not from `turtlebot3_gazebo`'s
 installed worlds. `worlds/<name>/world.yaml` is the source of truth and both
-simulators' wrappers are generated from it — see `worlds/README.md`.
+simulators' representations are generated from it — see `worlds/README.md`,
+which is also where the real-environment cloning workflow lives.
 
 The Gazebo `.world` is committed, so `backend:=gazebo` needs no build step. The
-Isaac Sim `.usd` is gitignored and must be built once per clone, per world:
+Isaac Sim `.usd` is a build product and is gitignored, so it has to be built
+once per clone, per world:
 
 ```bash
-scripts/build_world_usd.sh turtlebot3_world   # ~1 min
+scripts/build_world.sh turtlebot3_world   # ~1 min; builds BOTH
 ```
 
-Skipping it does not fail quietly: `tb3_sim.py` checks for the generated stage
-and names this command. Rebuild it after editing a manifest or its meshes; also
-rerun `scripts/build_world.py <name>` for the Gazebo side, since editing the
-manifest alone changes neither generated file.
+One command builds both on purpose: regenerating one without the other is the
+single way the two backends can come to describe different rooms. Skipping it
+does not fail quietly either — the launch names this command rather than letting
+gzserver come up with an empty scene.
+
+```bash
+scripts/check_worlds.py                   # stdlib only, under a second
+```
+
+verifies that every world's generated artifacts still came from its manifest,
+that nobody hand-edited one, and that the model still matches the map recorded
+in the real room. Worth a pre-commit hook.
 
 ## X11 for the GUI
 
@@ -122,13 +138,16 @@ scripts/build_images.sh                # both
 scripts/build_images.sh --base-only    # just the base, e.g. before verify.sh
 ```
 
-- `isaacsim6-humble:ngc` — `docker/isaacsim-ros2/Dockerfile.humble`, built
-  `FROM nvcr.io/nvidia/isaac-sim:6.0.1`. Isaac Sim 6.0 + ROS 2 Humble on Ubuntu
-  22.04, generic: no TurtleBot3, no X11, no workspace. Check it on its own with
-  `docker/isaacsim-ros2/verify.sh isaacsim6-humble:ngc` — it scores 5/5,
-  including Kit publishing `/clock` to the system Humble in the same container.
-- `tb3_sim2real/tb3_ros:humble` — `docker/ros/Dockerfile`, everything specific
-  to this repo layered on top. This is the one you will rebuild.
+- `isaacsim61-humble:ngc` — built `FROM nvcr.io/nvidia/isaac-sim:6.1.0`. Isaac
+  Sim 6.1 + ROS 2 Humble on Ubuntu 22.04, generic: no TurtleBot3, no X11, no
+  workspace. **Its Dockerfile is not in this repository.** It belongs to
+  `turtlebot3_isaacsim`, which is imported here rather than copied, and its
+  container is part of what is imported — a second copy of it here was the
+  stale one, still on 6.0.1, when this was written. Check it on its own with
+  `src/turtlebot3_isaacsim/docker/isaacsim-ros2/verify.sh isaacsim61-humble:ngc`.
+- `tb3_sim2real/tb3_ros:humble` — `docker/Dockerfile`, one thin layer on top:
+  Gazebo Classic's TurtleBot3 worlds, the real robot's drivers, cartographer,
+  and the workspace. This is the one you will rebuild.
 
 Pulling the NGC image needs `docker login nvcr.io` **and** a one-time licence
 acceptance in a browser for the same NGC org; the repository is not anonymously

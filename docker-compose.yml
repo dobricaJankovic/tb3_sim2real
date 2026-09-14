@@ -122,7 +122,7 @@ services:
       # --- Kit caches ---------------------------------------------------------
       # /scan appears 164-168 s after launch cold and 14 s warm; that 12x is the
       # whole argument for this block. The paths were measured by diffing the
-      # filesystem across a cold tb3_sim.py run rather than copied from NVIDIA's
+      # filesystem across a cold simulator run rather than copied from NVIDIA's
       # compose file, which mounts four $HOME-relative paths -- right for an
       # image whose user's home IS /isaac-sim, wrong here where HOME=/root. The
       # big one (493 MB of shader cache) is not $HOME-relative at all. The

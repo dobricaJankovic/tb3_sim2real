@@ -127,7 +127,7 @@
   at it with `ros_package_paths=[{'name': ..., 'path': ...}]`, where `path` is
   the package directory *itself* — resolution is `path / relative_path`, so
   naming the parent silently fails the same way. Verify with
-  `isaac/scripts/verify_asset.py`, which bounds the robot subtree specifically;
+  `turtlebot3_isaacsim`'s importer `verify()`, which bounds the robot subtree specifically;
   checking the whole stage is not enough, because a ground plane alone clears it.
 - **The robot bounces and rocks in place with nothing commanding it.** Nothing
   errors, every topic is healthy, and the robot slowly wanders off its spawn.
@@ -143,29 +143,32 @@
   there is always a loaded elastic contact to pump. Measured on the bare ground
   plane with no `/cmd_vel` at all: 3.58 deg peak-to-peak in pitch, pitch rate to
   +/-0.7 rad/s, 7.7 mm of drift in 7 s. With materials bound
-  (`import_tb3.py`'s `bind_robot_surfaces()`) the identical run reads 0.000 deg
+  (`turtlebot3_isaacsim`'s physics materials) the identical run reads 0.000 deg
   and 0.00 mm — it settles 0.3 deg nose-up on the skid and stops dead.
-  `tb3_sim.py` now refuses to start on a stage that has lost them, because the
+  The simulator refuses to start on a stage that has lost them, because the
   symptom otherwise reads as a physics-tuning problem rather than a stale asset.
-- **A crash in `tb3_sim.py` used to look like a clean exit.** `main()` ran under
+- **A crash in a Kit standalone script can look like a clean exit.** `main()` ran under
   `try/finally: os._exit(0)`, and `os._exit` ends the process before Python gets
   to report the exception — so a missing stage, a bad prim path or a failed
   precondition printed *nothing* and exited 0. The traceback is now printed
   explicitly and the status is 1. Worth remembering for any Kit script: the
   `os._exit` that dodges the TaskGroup teardown race also eats your errors.
-- **Re-running `import_tb3.py` used to leave the old asset behind.** The
-  importer does not overwrite: handed an existing `turtlebot3_burger.usd/` it
-  writes `turtlebot3_burger_1/` *inside* it, returns that path, and leaves the
-  previous copy in place. Every re-import kept working, so nothing pointed at
-  the growing pile, and only the printed `Robot asset:` line said which copy the
-  new `tb3_world.usd` actually referenced. The script now clears the directory
-  first, so an import is an import.
-- **Files written by the isaacsim container can't be deleted from the host.**
-  It runs as uid 1234, so anything it writes into `isaac/scenes/` is owned by
-  1234 and `rm` fails with EACCES on the subdirectories. Remove them with a
-  throwaway root container:
-  `docker run --rm --user root --entrypoint bash -v $PWD/isaac/scenes:/scenes
-  isaac-sim-docker:latest -c 'rm -rf /scenes/<path>'`.
+- **Isaac Sim's URDF importer does not overwrite.** Handed an existing
+  `turtlebot3_burger.usd/` it writes `turtlebot3_burger_1/` *inside* it, returns
+  that path, and leaves the previous copy in place — so every re-import keeps
+  working while silently accumulating copies, and only the printed asset path
+  says which one the stage actually references. Clear the output directory
+  first. `turtlebot3_isaacsim`'s importer does.
+- **Files written by the container can't be deleted from the host.** It runs as
+  root, so anything it writes — `worlds/<name>/isaac/` is the one that matters
+  here — is root-owned in your checkout and `rm` wants sudo. Remove it from
+  inside instead:
+  `docker compose run --rm tb3_ros rm -rf /worlds/<name>/isaac`.
+- **A world's `.usd` is stale and nothing says so.** Regenerating one
+  representation and not the other is the one way the two backends can come to
+  describe different rooms, and neither simulator can tell. Both generated files
+  carry the manifest's sha256; `scripts/check_worlds.py` is what reads it back.
+  Run it before believing a comparison between backends.
 - **Isaac Sim aborts on startup with a carb shared-memory assertion.** The
   message is
   `RStringInternals.inl:667 Assertion (false) failed: Failed to create shared
