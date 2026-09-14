@@ -1152,3 +1152,100 @@ resolves it into `map->odom`; it only bites if raw `/odom` is compared between
 backends without saying which frame is meant.
 
 Net: 47 tracked files where there were 67, about 2,500 lines fewer.
+
+## 2026-09-14 (last) — the meshes were never going to convert, and three bugs were hiding behind one cache
+
+A postscript to the restructure, and the most useful thing found all day. It
+started as a routine check: the registry now recommends OBJ for user worlds, and
+OBJ had never actually been through the pipeline.
+
+**The first OBJ world came out 100x too small,** and the manifest's `verify`
+bounds caught it — `-0.0295` where `-2.9500` was expected, on every axis. Isaac
+Sim's `AssetConverterContext` defaults to **centimetres**: it authors the
+converted layer with `metersPerUnit = 0.01`, and USD scales a reference by the
+ratio of the two layers' units, so a mesh whose vertices are in metres arrives
+in a metres stage divided by a hundred. A format that declares its own unit —
+Collada's `<unit meter="...">` — escapes this entirely, which is exactly why
+every world here had hidden it. `use_meter_as_world_unit = True` is the fix.
+
+**Turning that flag on is what revealed the real problem.** The mesh cache is
+keyed on mtime, so a settings change has to invalidate it; adding that
+invalidation made the converter run for the first time on Isaac Sim 6.1, and it
+answered:
+
+    Unsupported import format: .dae. Supported formats: .bvh, .fbx, .glb,
+    .gltf, .lxo, .md5, .obj, .ply, .stl, .usd, .usda, .usdc, .usdz
+
+**Isaac Sim 6.1 does not read Collada.** Every build of `turtlebot3_world`
+since the upgrade had been reusing `hexagon.usd` and `wall.usd` converted under
+6.0. The world could not have been rebuilt from a clean checkout, and nothing
+would have said so — `verify` passed each time, on stale artifacts that happened
+to be correct.
+
+So the meshes became OBJ. `scripts/dae_to_obj.py` bakes the declared
+`<unit meter="0.0254">` into the vertices, because OBJ has no unit field, and
+deliberately does **not** apply `up_axis`: these files declare `Y_UP` while
+laying their vertices out Z-up, and Gazebo ignores the label, so the vertices
+are the parity truth. The `.dae` files are deleted rather than kept beside the
+`.obj` — two files holding the same geometry is the thing the registry exists
+to prevent, and upstream still has them.
+
+Checked before trusting it: each file has exactly one `<geometry>` and one
+visual-scene node with no transform, face indices are in range, and the scaled
+bounds reproduce **every** number in the manifest's `verify` block
+analytically — `wall` at 0.25 after a -90 degree yaw gives x = +/-3.29955
+against the recorded `-3.2996`; `head` at 0.8 offset to x = 3.5 gives 4.6732 and
+z = 1.532; `left_hand` at 0.55 gives y = 3.3985. All four exact.
+
+Then measured, same manifest, same meshes, robot at the manifest's spawn:
+
+| | gazebo | isaacsim |
+|---|---|---|
+| rays | 360 | 360 |
+| with a return | 324 | 307 |
+| closest | 0.514 m | 0.521 m |
+| furthest | 3.352 m | 3.366 m |
+
+**7 mm apart on the closest return**, and the pre-conversion Collada
+measurement was 324/360 at 0.511-3.357 m, so the conversion moved nothing.
+Note also that Isaac now publishes **360** rays, not the 3600 `docs/status.md`
+recorded: the imported package ships a real LDS scan pattern. That entry was
+describing the simulator this repository used to carry.
+
+### Two more, found on the way
+
+**`ignore_animation` and `ignore_cameras` had never done anything.**
+`AssetConverterContext` is a plain Python object, so assigning an attribute it
+does not have succeeds silently. The real names are `ignore_animations` and
+`ignore_camera`. Settings now go through a dict, and the code refuses any name
+the context does not already carry — which is the same lesson CLAUDE.md already
+records about node attributes that do not exist, in a place nobody had looked.
+
+**A missing cache digest is a mismatch, not a clean slate.** The first version
+of the invalidation wrote the settings digest without clearing a cache that
+predated it, so the run that fixed the 100x error reused the 100x meshes and
+failed identically. It took two rebuilds to notice that the fix was correct and
+the cache was lying.
+
+### And the check got sharper
+
+`check_worlds.py`'s footprint comparison can now rasterise a yawed mesh, which
+is what `turtlebot3_world`'s wall is — so the flagship world finally gets a real
+comparison rather than a "needs a mesh library" skip. First run scored it 64%
+spurious, which was the check being wrong rather than the world: the five
+decorative hexagons sit **outside** the arena, and upstream's map was recorded
+from inside it.
+
+The fix is to read the map's third state. Occupied and free are not
+complements; what is left is UNKNOWN, where the robot never looked. A model wall
+standing in free space contradicts the map; one standing in unknown space does
+not. With that distinction `turtlebot3_world` reads **100% of the map modelled,
+0% contradicted, 946 model cells in space the map never saw** — and a map
+mirrored about its x axis still fails, at 22% / 47%.
+
+**The lesson, and it is the one this repository keeps relearning.** Three
+independent bugs — a unit default, two misspelled flags, a stale cache — all
+sat behind one cache entry that was correct for the wrong reason. Nothing
+errored, `verify` passed, and both simulators agreed. A check that only runs
+against cached work is not a check. The cache now carries a digest of what
+produced it.

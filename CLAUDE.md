@@ -33,7 +33,8 @@ worlds/<name>/        world registry. world.yaml is the source of truth; the
 scripts/              workspace.sh (vcs import), build_images.sh,
                       build_world.py / build_world_usd.py / build_world.sh (the
                       generators), clone_world.py (a real room's Nav2 map -> a
-                      world), check_worlds.py (the drift check)
+                      world), dae_to_obj.py (Isaac Sim reads no Collada),
+                      check_worlds.py (the drift check)
 docker/               one thin layer over the base image; the base itself is
                       NOT here, see below
 src/                  imported source dependencies (gitignored)
