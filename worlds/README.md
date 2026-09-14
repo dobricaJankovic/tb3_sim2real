@@ -146,9 +146,11 @@ a prop exported with an `.mtl` is not clobbered by a manifest that says nothing
 about it. An explicit `material:` always wins; on the USD side it binds
 `strongerThanDescendants` for exactly that reason.
 
-`build_world_usd.py` reports the number of shaded prims and `check_worlds.py`
-compares the two generated files, because a stage that renders grey loads,
-collides and measures perfectly and fails nothing else.
+`build_world_usd.py` counts the prims that actually resolve to a bound surface
+and reports it, because a stage that renders grey loads, collides and measures
+perfectly and fails nothing else. On the Gazebo side a colour edited into the
+`.world` by hand is caught by the provenance digest like any other edit —
+`check_worlds.py`'s round-trip compares name, pose and geometry, not material.
 
 ## Props you cannot make from boxes
 
