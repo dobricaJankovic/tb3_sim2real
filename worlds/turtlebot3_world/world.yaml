@@ -69,64 +69,85 @@ verify:
   bounds_max: [4.6732, 3.3985, 1.532]
   tolerance: 0.02
 
+# Materials are upstream's, from the same model.sdf as the placements: the nine
+# cylinders white, the five decorative hexagons green, the wall flat black. They
+# were missing until 2026-09-15 and everything defaulted to white, so Gazebo had
+# been rendering this arena wrong too — not only Isaac Sim, which rendered it grey
+# because a Gazebo material SCRIPT NAME is not something Isaac can resolve.
+# worlds.PALETTE turns these names into RGB once, for both backends.
 bodies:
   - name: one_one
     geometry: {type: cylinder, radius: 0.15, length: 0.5}
     xyz: [-1.1, -1.1, 0.25]
     rpy: [0, 0, 0]
+    material: Gazebo/White
   - name: one_two
     geometry: {type: cylinder, radius: 0.15, length: 0.5}
     xyz: [-1.1, 0, 0.25]
     rpy: [0, 0, 0]
+    material: Gazebo/White
   - name: one_three
     geometry: {type: cylinder, radius: 0.15, length: 0.5}
     xyz: [-1.1, 1.1, 0.25]
     rpy: [0, 0, 0]
+    material: Gazebo/White
   - name: two_one
     geometry: {type: cylinder, radius: 0.15, length: 0.5}
     xyz: [0, -1.1, 0.25]
     rpy: [0, 0, 0]
+    material: Gazebo/White
   - name: two_two
     geometry: {type: cylinder, radius: 0.15, length: 0.5}
     xyz: [0, 0, 0.25]
     rpy: [0, 0, 0]
+    material: Gazebo/White
   - name: two_three
     geometry: {type: cylinder, radius: 0.15, length: 0.5}
     xyz: [0, 1.1, 0.25]
     rpy: [0, 0, 0]
+    material: Gazebo/White
   - name: three_one
     geometry: {type: cylinder, radius: 0.15, length: 0.5}
     xyz: [1.1, -1.1, 0.25]
     rpy: [0, 0, 0]
+    material: Gazebo/White
   - name: three_two
     geometry: {type: cylinder, radius: 0.15, length: 0.5}
     xyz: [1.1, 0, 0.25]
     rpy: [0, 0, 0]
+    material: Gazebo/White
   - name: three_three
     geometry: {type: cylinder, radius: 0.15, length: 0.5}
     xyz: [1.1, 1.1, 0.25]
     rpy: [0, 0, 0]
+    material: Gazebo/White
   - name: head
     geometry: {type: mesh, uri: meshes/hexagon.obj, scale: [0.8, 0.8, 0.8]}
     xyz: [3.5, 0, -0.5]
     rpy: [0, 0, 0]
+    material: Gazebo/Green
   - name: left_hand
     geometry: {type: mesh, uri: meshes/hexagon.obj, scale: [0.55, 0.55, 0.55]}
     xyz: [1.8, 2.7, 0]
     rpy: [0, 0, 0]
+    material: Gazebo/Green
   - name: right_hand
     geometry: {type: mesh, uri: meshes/hexagon.obj, scale: [0.55, 0.55, 0.55]}
     xyz: [1.8, -2.7, 0]
     rpy: [0, 0, 0]
+    material: Gazebo/Green
   - name: left_foot
     geometry: {type: mesh, uri: meshes/hexagon.obj, scale: [0.55, 0.55, 0.55]}
     xyz: [-1.8, 2.7, 0]
     rpy: [0, 0, 0]
+    material: Gazebo/Green
   - name: right_foot
     geometry: {type: mesh, uri: meshes/hexagon.obj, scale: [0.55, 0.55, 0.55]}
     xyz: [-1.8, -2.7, 0]
     rpy: [0, 0, 0]
+    material: Gazebo/Green
   - name: body
     geometry: {type: mesh, uri: meshes/wall.obj, scale: [0.25, 0.25, 0.25]}
     xyz: [0, 0, -0.3]
     rpy: [0, 0, -1.5708]
+    material: Gazebo/FlatBlack

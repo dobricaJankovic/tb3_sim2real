@@ -158,12 +158,7 @@ def build_world(manifest, head):
             '          <geometry>',
             geom,
             '          </geometry>',
-            '          <material>',
-            '            <script>',
-            '              <uri>file://media/materials/scripts/gazebo.material</uri>',
-            f'              <name>{body.get("material", "Gazebo/White")}</name>',
-            '            </script>',
-            '          </material>',
+            *material_xml(body),
             '        </visual>',
         ]
 
@@ -171,6 +166,38 @@ def build_world(manifest, head):
         parts += ['      </link>', '    </model>']
     parts += ['  </world>', '</sdf>', '']
     return '\n'.join(parts)
+
+
+def material_xml(body, indent=10):
+    """A body's <material>, as numbers rather than an Ogre script name.
+
+    SDF's own colour elements, not <script>, because the script name is a
+    Gazebo-only token: Isaac Sim cannot resolve `Gazebo/White` and rendered
+    every stage grey for as long as that was the only thing the manifest said
+    about colour. worlds.material() resolves the stock names to the RGB in
+    Gazebo's own gazebo.material, so a manifest written either way looks the
+    same in both simulators.
+
+    An empty list means "no <material> element at all" — the mesh brought its
+    own, and Gazebo should use the .mtl beside it.
+    """
+    mat = worlds.material(body)
+    if mat is None:
+        return []
+    pad = ' ' * indent
+    r, g, b = mat['color']
+    # Upstream's stock scripts set ambient == diffuse, so match them rather than
+    # inventing an ambient term. Specular is derived from roughness so the field
+    # is not inert on this backend; Gazebo Classic has no PBR, so this is the
+    # closest honest mapping, and metallic has no analogue at all.
+    spec = round((1.0 - mat['roughness']) * 0.5, 4)
+    return [
+        f'{pad}<material>',
+        f'{pad}  <ambient>{r} {g} {b} 1</ambient>',
+        f'{pad}  <diffuse>{r} {g} {b} 1</diffuse>',
+        f'{pad}  <specular>{spec} {spec} {spec} 1</specular>',
+        f'{pad}</material>',
+    ]
 
 
 def build_model_config(manifest, head):

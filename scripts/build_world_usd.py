@@ -66,9 +66,10 @@ sim_app = SimulationApp({'headless': True})
 import omni.kit.asset_converter  # noqa: E402
 import omni.usd  # noqa: E402
 from isaacsim.core.utils.stage import add_reference_to_stage, create_new_stage  # noqa: E402
-from pxr import Gf, Usd, UsdGeom, UsdPhysics  # noqa: E402
+from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics, UsdShade  # noqa: E402
 
 ROOT_PRIM = '/World'
+LOOKS_PRIM = '/World/Looks'
 
 #: Layer metadata the generated stage carries, so a USD found on disk can be
 #: traced back to the manifest revision it came from even though it is a binary
@@ -251,6 +252,35 @@ def place(stage, prim_path, xyz, rpy, scale=None):
             f'wrapper Xform and put the reference on a child.')
 
 
+def bind_material(stage, prim_path, mat, name):
+    """Bind a UsdPreviewSurface carrying the manifest's colour.
+
+    UsdPreviewSurface rather than MDL/OmniPBR: it is the one shading model in
+    the USD core schema, so the stage stays readable by anything that reads USD
+    instead of only by Kit. The RTX renderer maps it to its own PBR internally.
+
+    strongerThanDescendants, because the point of an explicit `material:` on a
+    mesh body is to override whatever the .mtl said. The default binding
+    strength is weakerThanDescendants, under which a converted asset's own
+    material would quietly win and the manifest would look like it had no
+    effect.
+    """
+    UsdGeom.Scope.Define(stage, LOOKS_PRIM)
+    path = f'{LOOKS_PRIM}/{name}'
+    material = UsdShade.Material.Define(stage, path)
+    shader = UsdShade.Shader.Define(stage, f'{path}/Shader')
+    shader.CreateIdAttr('UsdPreviewSurface')
+    r, g, b = mat['color']
+    shader.CreateInput('diffuseColor', Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(r, g, b))
+    shader.CreateInput('roughness', Sdf.ValueTypeNames.Float).Set(mat['roughness'])
+    shader.CreateInput('metallic', Sdf.ValueTypeNames.Float).Set(mat['metallic'])
+    material.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), 'surface')
+
+    prim = stage.GetPrimAtPath(prim_path)
+    api = UsdShade.MaterialBindingAPI.Apply(prim)
+    api.Bind(material, bindingStrength=UsdShade.Tokens.strongerThanDescendants)
+
+
 def add_collider(prim, exact):
     """Static collider. Never a rigid body — every manifest body is static.
 
@@ -315,6 +345,7 @@ def build(name_or_path):
                 if prim.IsA(UsdGeom.Mesh):
                     add_collider(prim, exact=True)
         else:
+            scale = None
             if g['type'] == 'cylinder':
                 # SDF cylinders are Z-aligned, and so is UsdGeom.Cylinder's
                 # default axis, so no extra rotation is needed.
@@ -329,18 +360,22 @@ def build(name_or_path):
                 prim = UsdGeom.Cube.Define(stage, path)
                 prim.CreateSizeAttr(1.0)
                 prim.CreateExtentAttr([Gf.Vec3f(-.5, -.5, -.5), Gf.Vec3f(.5, .5, .5)])
-                place(stage, path, xyz, rpy, [sx, sy, sz])
-                add_collider(stage.GetPrimAtPath(path), exact=False)
-                continue
+                # A unit cube scaled to size, so the pose and the dimensions
+                # both go through place() like every other primitive.
+                scale = [sx, sy, sz]
             elif g['type'] == 'sphere':
                 prim = UsdGeom.Sphere.Define(stage, path)
                 prim.CreateRadiusAttr(float(g['radius']))
             else:
                 raise SystemExit(f'build_world_usd: unsupported geometry {g["type"]!r}')
-            place(stage, path, xyz, rpy)
+            place(stage, path, xyz, rpy, scale)
             # Analytic primitives get analytic collision, not a mesh
             # approximation — cheaper and exact.
             add_collider(stage.GetPrimAtPath(path), exact=False)
+
+        mat = worlds.material(body)
+        if mat is not None:
+            bind_material(stage, path, mat, body['name'])
 
     with open(os.path.join(world_dir, worlds.MANIFEST), 'rb') as f:
         stage.SetMetadata('customLayerData',
@@ -379,6 +414,18 @@ def verify(stage, manifest, name):
             n_mesh += 1
             attr = UsdPhysics.MeshCollisionAPI(prim).GetApproximationAttr()
             approximations.add(attr.Get() if attr else None)
+
+    # A stage can load, collide and measure correctly and still render entirely
+    # grey — which is exactly what happened for as long as the manifest's only
+    # statement about colour was a Gazebo script name. So the bound material is
+    # verified like anything else rather than left to the eye.
+    n_shaded = 0
+    for prim in Usd.PrimRange(stage.GetPrimAtPath(ROOT_PRIM)):
+        if prim.IsA(UsdGeom.Gprim):
+            bound = UsdShade.MaterialBindingAPI(prim).ComputeBoundMaterial()[0]
+            if bound and bound.ComputeSurfaceSource()[0]:
+                n_shaded += 1
+    print(f'verify: {n_shaded} shaded prims')
 
     print(f'verify: {n_col} collision prims ({n_mesh} mesh, '
           f'approximations={sorted(str(a) for a in approximations) or "n/a"}), '

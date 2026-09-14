@@ -40,6 +40,83 @@ MODES = ('generated', 'adopted', 'none')
 
 BACKENDS = ('real', 'gazebo', 'isaacsim')
 
+# --- materials ----------------------------------------------------------------
+#
+# A body's colour has to reach two renderers that share no material system at
+# all, so the manifest carries it as DATA and each generator writes it in its
+# own dialect: SDF <ambient>/<diffuse>/<specular> for Gazebo, a bound
+# UsdPreviewSurface for Isaac Sim.
+#
+# This is why `material: Gazebo/White` alone was not enough. That string is an
+# Ogre script name; it means something only to Gazebo, and Isaac Sim has no way
+# to resolve it — which is exactly why every Isaac stage rendered grey while the
+# Gazebo one looked right. The names are kept as ALIASES because upstream SDF is
+# full of them and a user copying one in should get the colour they expect on
+# both backends, but they resolve to numbers here, once, in the module both
+# generators already share.
+#
+# Values are the `diffuse` rows of Gazebo 11's own
+# media/materials/scripts/gazebo.material, read off the installed file rather
+# than eyeballed. Gazebo/Wood and friends are deliberately absent: they are
+# texture_unit scripts, not colours, and there is nothing to copy.
+PALETTE = {
+    'Gazebo/White': (1.0, 1.0, 1.0),
+    'Gazebo/Grey': (0.7, 0.7, 0.7),
+    'Gazebo/Black': (0.0, 0.0, 0.0),
+    'Gazebo/FlatBlack': (0.1, 0.1, 0.1),
+    'Gazebo/Red': (1.0, 0.0, 0.0),
+    'Gazebo/Green': (0.0, 1.0, 0.0),
+    'Gazebo/Blue': (0.0, 0.0, 1.0),
+    'Gazebo/Yellow': (1.0, 1.0, 0.0),
+    'Gazebo/Orange': (1.0, 0.5088, 0.0468),
+}
+
+# `material: asset` — keep whatever the geometry file brought with it. Meaningful
+# only for a mesh, and the default for one: a prop exported with an .mtl already
+# knows what colour it is, and overriding that from the manifest would throw the
+# texture away.
+ASSET = 'asset'
+
+DEFAULT_COLOR = (1.0, 1.0, 1.0)
+DEFAULT_ROUGHNESS = 0.5
+DEFAULT_METALLIC = 0.0
+
+
+def material(body):
+    """A body's material as {'color': (r, g, b), 'roughness': f, 'metallic': f}.
+
+    Returns None for "use whatever the geometry brought with it", which is the
+    default for a mesh and is never the default for a primitive — a cylinder
+    carries no material of its own, so one has to come from somewhere.
+    """
+    spec = body.get('material', ASSET if body['geometry']['type'] == 'mesh' else {})
+    if spec == ASSET:
+        return None
+    if isinstance(spec, str):
+        try:
+            spec = {'color': PALETTE[spec]}
+        except KeyError:
+            raise RuntimeError(
+                "unknown material {!r} on body {!r}. Use one of: {}, or give "
+                "the colour directly as {{color: [r, g, b]}} with components in "
+                "0..1, or {!r} to keep the mesh's own.".format(
+                    spec, body['name'], ', '.join(sorted(PALETTE)), ASSET))
+    if not isinstance(spec, dict):
+        raise RuntimeError(
+            'material on body {!r} must be a name, a mapping, or {!r}; got '
+            '{!r}'.format(body['name'], ASSET, spec))
+
+    color = tuple(float(c) for c in spec.get('color', DEFAULT_COLOR))
+    if len(color) != 3 or not all(0.0 <= c <= 1.0 for c in color):
+        raise RuntimeError(
+            'material.color on body {!r} must be three components in 0..1; got '
+            '{!r}'.format(body['name'], spec.get('color')))
+    return {
+        'color': color,
+        'roughness': float(spec.get('roughness', DEFAULT_ROUGHNESS)),
+        'metallic': float(spec.get('metallic', DEFAULT_METALLIC)),
+    }
+
 
 def root():
     """Registry root. Falls back to the checkout when the mount is absent."""
