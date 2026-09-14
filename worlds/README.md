@@ -29,6 +29,18 @@ your checkout is yours. Keeping its writes to one subdirectory leaves
 `world.yaml`, `meshes/` and `map/` at normal permissions.
 `scripts/build_world.sh` creates it on the host first, for the same reason.
 
+## What is here
+
+| world | what it is | geometry |
+|---|---|---|
+| `turtlebot3_world` | ROBOTIS' standard arena, derived from upstream's `model.sdf` | 9 cylinders + 6 meshes |
+| `empty_stage` | ground plane and a light, nothing else | none |
+| `small_office` | a 6 x 5 m room with a partition and furniture | 5 boxes + 7 meshes |
+
+`small_office` is the one to read if you are adding your own: the room is boxes
+you could take off a tape measure, the furniture is meshes because it has to be,
+and the colour is manifest data because both renderers need it.
+
 ## Using one
 
 ```bash
