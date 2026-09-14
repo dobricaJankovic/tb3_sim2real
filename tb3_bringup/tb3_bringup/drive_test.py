@@ -47,7 +47,7 @@ SEQUENCES = {
     # Nav2, which is why this is worth measuring rather than assuming.
     'collide': [
         ('settle_pre', 0.00, 0.00, 2.0),
-        ('approach', 0.15, 0.00, 14.0),
+        ('approach', 0.15, 0.00, 25.0),
         ('rest', 0.00, 0.00, 3.0),
         ('reverse', -0.10, 0.00, 3.0),
         ('settle_post', 0.00, 0.00, 3.0),
