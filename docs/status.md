@@ -2,6 +2,83 @@
 
 What is verified, and what is not. Start here before claiming something works.
 
+## Verified on 2026-09-15
+
+### Open-loop kinematics, one instrument, both backends
+
+`ros2 run tb3_bringup drive_test`, `world:=empty_stage`, identical `/cmd_vel`
+sequence, two runs per backend. Phases are timed on the **simulator's** clock.
+
+| | gazebo | isaacsim |
+|---|---|---|
+| real-time factor | 0.9997 / 0.9995 | 0.9592 / 0.9517 |
+| `straight` 0.15 m/s x 5 s (want 0.750 m) | 0.7358 m, **-1.9%** | 0.7175 / 0.7113 m, **-4.7%** |
+| `rotate` 0.5 rad/s x 5 s (want 2.500 rad) | 2.4777 rad, **-0.9%** | 1.7211 / 1.7631 rad, **-30.3%** |
+| `arc` displacement (want ~0.50 m) | 0.4466 m | 0.4445 / 0.4459 m |
+| `arc` yaw (want 1.500 rad) | 1.4634 rad | 1.0729 / 1.0736 rad |
+| drift at rest, before any motion | 2e-05 m, 0 rad | 0 m, 0 rad |
+| run-to-run spread | **0.00000 on every metric** | 0.0063 m, 0.042 rad |
+
+- **Neither backend drifts at rest.** `settle_pre` is the only phase never
+  preceded by motion, and both are at zero. The nonzero numbers in the other
+  stop phases are deceleration coast, not drift: `peak_vx` at the entry to
+  `stop_1` is still 0.150 / 0.148 m/s, and both settle below 4e-04 m/s.
+- **Gazebo is bit-identical between runs**; Isaac Sim is not, which is expected
+  of GPU physics and is why two runs of each were taken. The spread is small
+  enough to make the headline differences conclusive — except the arc's
+  displacement, where spread and difference are the same size (0.0014 m) and
+  the comparison is **inconclusive**.
+- **Velocity onset differs.** Gazebo ramps over ~0.10 s; Isaac steps from
+  exactly 0 to ~0.147 m/s in one sample. Not a fault, but it means the two do
+  not agree on what happens in the first tenth of a second of any command.
+- Isaac veers on the straight (-0.0085 / -0.0158 rad of yaw) where Gazebo holds
+  0.00000 exactly.
+
+### The one real defect: Isaac Sim under-rotates
+
+Full write-up with the sweep that diagnoses it:
+[`measurements/isaac_angular_deficit.md`](../measurements/isaac_angular_deficit.md).
+
+Short version: the wheels reach only 73% of the commanded joint velocity at
+`wz = 0.5` and **48% at `wz = 0.2`**, while the absolute error stays constant at
+0.25-0.43 rad/s. That is a fixed friction torque against a finite-gain velocity
+drive, not a kinematics or units error. The gain is the one
+`turtlebot3_isaacsim` already marks `# TODO unverified gain`. **The fix belongs
+in that package**, which owns the asset, the gains and the physics materials.
+
+It is worst at low rates, which is Nav2's regime for final alignment and
+in-place turns.
+
+### Materials, and a fidelity bug in Gazebo too
+
+Isaac Sim rendered every stage grey because the manifest's only statement about
+colour was `Gazebo/White` — an Ogre script name, meaningful to Gazebo alone.
+Colour is now data in the manifest and both generators write their own dialect.
+
+Fixing it surfaced a second bug: upstream's `model.sdf` paints the wall
+`Gazebo/FlatBlack` and the five hexagons `Gazebo/Green`, and the manifest had
+dropped both, so all 15 bodies defaulted to white. **Gazebo had been rendering
+`turtlebot3_world` wrong as well**, not only Isaac.
+
+Verified by rendering both backends headless (`scripts/snapshot.py`,
+`scripts/snapshot_gazebo.py`) and by resolving `ComputeBoundMaterial` on every
+Gprim: 12/12 on `small_office`, 15/15 on `turtlebot3_world`.
+
+### New in the registry
+
+- **`small_office`** — 6.0 x 5.0 m room, five boxes plus a partition, seven mesh
+  props from six OBJs (AWS RoboMaker, MIT-0). Builds for both backends; USD
+  bounds match the value computed analytically from the OBJ vertices and the
+  manifest placements, to four decimals.
+- **`isaacsim_bringup` moved to the `IsaacSim-6.1.0` tag**, matching the
+  installed simulator. The blocker was fixed at source in `turtlebot3_isaacsim`
+  (`AnyLaunchDescriptionSource` + `run_isaacsim.launch.xml`). **Not pushed.**
+- **`scripts/dae_to_obj.py` now applies visual-scene node transforms.** It used
+  to warn and skip them, which on `gazebo_models`' `cafe_table.dae` put the
+  tabletop flat on the floor while the overall height was only 38 mm out — an
+  error `verify` cannot catch. Upstream's two meshes re-convert byte-for-byte
+  identical, so `turtlebot3_world` is unaffected.
+
 ## Verified on 2026-09-14, after the restructure
 
 One `ros2 launch` per backend, the world chosen by name, both simulated
