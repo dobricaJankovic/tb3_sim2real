@@ -64,9 +64,11 @@ The 324-vs-307 gap is the no-return encoding, not the geometry: Isaac reports
   `map_server`, `planner_server`, `controller_server`, `behavior_server`,
   `bt_navigator`. `/map` is 384x384 at 0.05 m, served out of
   `worlds/turtlebot3_world/map/` rather than the bringup package.
-- **`nav:=true` on isaacsim** — same eight nodes, same map, and publishing one
+- **`nav:=true` on isaacsim** — same eight nodes, same map, **zero errors**,
+  both lifecycle managers answering `is_active: True`, and publishing one
   `/initialpose` at the manifest's spawn produced `map->odom` at exactly
-  `[-2.000, -0.500]`. See the caveat below.
+  `[-2.000, -0.500]`. Measured on a freshly restarted container; see the trap
+  below for why that matters.
 - **`backend:=real`** — `robot_state_publisher`, the LDS driver and
   `turtlebot3_node` all start and the node fails on
   `Failed to open the port(/dev/ttyACM0)`, which is the correct failure with no
@@ -83,25 +85,25 @@ spawn. Both are valid odometry; AMCL resolves the difference into `map->odom`.
 It matters only if you compare raw `/odom` between backends without saying which
 frame you mean.
 
-### Nav2's lifecycle managers report a failed bringup on the Isaac backend
+### One trap, and it was mine, not the repository's
 
-Observed once, on the run above. Both managers logged
+An earlier attempt at the Isaac Nav2 run logged
 
-    Failed to change state for node: map_server        (localization)
-    Failed to change state for node: controller_server (navigation)
+    Failed to change state for node: map_server
     Failed to bring up all requested nodes. Aborting bringup.
 
-and yet every managed node reached active: `/map` was served and AMCL published
-`map->odom`. The transitions went through; the managers timed out waiting for
-the replies, because Kit is still loading the stage and holding the machine
-while Nav2 configures. So the nodes work but the managers believe bringup
-failed, which means no bond monitoring and `is_active` answering wrongly.
+and it was tempting to write that up as Kit holding the machine while Nav2
+configures. It was not. Leftover `ros2 launch` processes from previous tests
+were still on the DDS domain: `pkill -INT -f "ros2 launch"` from inside a
+`docker compose exec -T` that has already exited does not reach them, and
+`pkill -f gzserver` in a subshell that exited first never runs at all. Two
+lifecycle managers then fight over the same nodes, `ros2 node list` prints
+every name twice, and a second gzserver dies with exit code 255 and no message.
 
-**A navigation goal has not been driven on the Isaac backend since this was
-seen.** Do not quote it as working end to end until it has. The fix, when it is
-wanted, is `config/nav2_isaacsim.yaml` with a longer lifecycle
-`service_timeout` — which is the first genuine per-backend Nav2 difference this
-project has found, and exactly what that file is for.
+On a restarted container the same run is clean. **If a backend misbehaves,
+check `pgrep -af "ros2 launch|gzserver|isaac-sim"` before believing anything
+else** — `docker compose restart tb3_ros` is the reliable reset, and costs a
+1.5 s rebuild of `/ws/install`.
 
 ## Known open
 
@@ -119,11 +121,12 @@ project has found, and exactly what that file is for.
 - **`backend:=real` is unverified.** No robot has been on the bench. The launch
   file mirrors `turtlebot3_bringup/launch/robot.launch.py` minus the state
   publisher, which is shared.
-- **Nav2 has not been re-run since the restructure.** It came up and drove to a
-  goal on both simulated backends before it (see `docs/history.md`), and the
-  only thing that changed for it is where the map comes from and that it now
-  starts on `wait_for_sim`'s exit rather than beside it. Worth re-running before
-  it is quoted.
+- **Nav2 comes up on both simulated backends; a goal has not been driven since
+  the restructure.** Localisation is verified (`map->odom` at the spawn pose on
+  both) and every lifecycle node is active, but the last recorded drive-to-goal
+  is from before this work (see `docs/history.md`). Nothing in the change
+  touches the planner or controller — only where the map comes from and that
+  Nav2 now starts on `wait_for_sim`'s exit — but it is worth a run.
 - **Per-backend Nav2 tuning is unstarted.** There is one
   `config/nav2_params.yaml`, verbatim `turtlebot3_navigation2`'s
   `param/humble/burger.yaml`. `bringup.launch.py` prefers
