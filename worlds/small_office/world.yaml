@@ -1,0 +1,116 @@
+# small_office — a room you could build yourself, with props you could not.
+#
+# THIS FILE IS THE SOURCE OF TRUTH. The Gazebo .world and the Isaac Sim .usd are
+# both GENERATED from it:
+#
+#   scripts/build_world.sh small_office   -> small_office.world      (SDF, committed)
+#                                         -> isaac/small_office.usd  (gitignored)
+#
+# The point of this world is the division of labour that the registry is for:
+#
+#   - The ROOM is primitives. Six boxes, written by hand below, with dimensions
+#     you can take off a tape measure. Anyone can add a wall here.
+#   - The PROPS are meshes, because a chair back is curved, a bin has a round
+#     rim and a table has tapered legs, and none of those are a box. They come
+#     from one OBJ each, shared byte-for-byte by both simulators.
+#   - The COLOUR is neither. It is data in this file, so the two renderers get
+#     it from the same place rather than from their own material systems.
+#
+# meshes/SOURCE.md records where the props came from and under what licence.
+
+name: small_office
+description: >-
+  A single 6.0 x 5.0 m room with a partition forming an alcove, furnished with a
+  dining table and two chairs, a coffee table, a shelf, a cabinet and a bin.
+
+# Open floor, clear of every prop, facing the length of the room.
+spawn:
+  xyz: [-1.5, -1.5, 0.01]
+  yaw: 0.0
+
+# Every body is static: collider plus visual, no rigid-body dynamics. The props
+# are exact triangle-mesh colliders, which is legal precisely because they are
+# static — and necessary, because the convex hull of a chair is a solid wedge
+# that fills the space under the seat, and of the shelf a solid block.
+
+bodies:
+  # --- the room: boxes, 0.1 m thick, 1.0 m tall -------------------------------
+  # Tall enough that the burger's 0.182 m scan plane is nowhere near the top
+  # edge. Interior is x in [-3.0, 3.0], y in [-2.5, 2.5].
+  - name: wall_north
+    geometry: {type: box, size: [6.2, 0.1, 1.0]}
+    xyz: [0.0, 2.55, 0.5]
+    rpy: [0, 0, 0]
+    material: Gazebo/Grey
+  - name: wall_south
+    geometry: {type: box, size: [6.2, 0.1, 1.0]}
+    xyz: [0.0, -2.55, 0.5]
+    rpy: [0, 0, 0]
+    material: Gazebo/Grey
+  - name: wall_east
+    geometry: {type: box, size: [0.1, 5.0, 1.0]}
+    xyz: [3.05, 0.0, 0.5]
+    rpy: [0, 0, 0]
+    material: Gazebo/Grey
+  - name: wall_west
+    geometry: {type: box, size: [0.1, 5.0, 1.0]}
+    xyz: [-3.05, 0.0, 0.5]
+    rpy: [0, 0, 0]
+    material: Gazebo/Grey
+  # A partition, not a full wall: it leaves a 0.85 m gap at the south end, so
+  # the alcove behind it has one way in and the planner has a real decision to
+  # make rather than a straight line across an empty box.
+  - name: partition
+    geometry: {type: box, size: [0.1, 2.2, 1.0]}
+    xyz: [0.8, 1.45, 0.5]
+    rpy: [0, 0, 0]
+    material: Gazebo/Grey
+
+  # --- the props: meshes ------------------------------------------------------
+  # Each mesh has its base at z = 0 and is centred in x/y, so xyz is the
+  # footprint centre on the floor and scale is 1. rpy yaws it in place.
+  - name: table
+    geometry: {type: mesh, uri: meshes/table.obj, scale: [1.0, 1.0, 1.0]}
+    xyz: [1.6, -1.3, 0.0]
+    rpy: [0, 0, 1.5708]
+    material: {color: [0.45, 0.30, 0.17], roughness: 0.6}
+  - name: chair_north
+    geometry: {type: mesh, uri: meshes/chair.obj, scale: [1.0, 1.0, 1.0]}
+    xyz: [1.6, -0.55, 0.0]
+    rpy: [0, 0, 3.14159]
+    material: {color: [0.25, 0.28, 0.33], roughness: 0.7}
+  - name: chair_south
+    geometry: {type: mesh, uri: meshes/chair.obj, scale: [1.0, 1.0, 1.0]}
+    xyz: [1.6, -2.05, 0.0]
+    rpy: [0, 0, 0.0]
+    material: {color: [0.25, 0.28, 0.33], roughness: 0.7}
+  - name: coffee_table
+    geometry: {type: mesh, uri: meshes/coffee_table.obj, scale: [1.0, 1.0, 1.0]}
+    xyz: [-1.8, 1.2, 0.0]
+    rpy: [0, 0, 0.0]
+    material: {color: [0.55, 0.38, 0.22], roughness: 0.5}
+  - name: shelf
+    geometry: {type: mesh, uri: meshes/shelf.obj, scale: [1.0, 1.0, 1.0]}
+    xyz: [-2.6, -1.5, 0.0]
+    rpy: [0, 0, 1.5708]
+    material: {color: [0.60, 0.45, 0.28], roughness: 0.6}
+  # In the alcove behind the partition.
+  - name: cabinet
+    geometry: {type: mesh, uri: meshes/cabinet.obj, scale: [1.0, 1.0, 1.0]}
+    xyz: [2.0, 2.1, 0.0]
+    rpy: [0, 0, 0.0]
+    material: {color: [0.45, 0.30, 0.17], roughness: 0.6}
+  - name: bin
+    geometry: {type: mesh, uri: meshes/bin.obj, scale: [1.0, 1.0, 1.0]}
+    xyz: [2.7, -2.2, 0.0]
+    rpy: [0, 0, 0.0]
+    material: {color: [0.20, 0.45, 0.25], roughness: 0.8}
+
+# Checked by build_world_usd.py against the assembled Isaac stage. Computed
+# analytically from the bodies above, NOT copied from the generator's own
+# output, so the two are independent and a converter that misreads a scale has
+# something to fail against.
+verify:
+  bounds_min: [-3.1, -2.6, 0.0]
+  bounds_max: [3.1, 2.6, 1.1362]
+  tolerance: 0.02

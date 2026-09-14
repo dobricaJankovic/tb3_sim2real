@@ -117,6 +117,75 @@ alternative and it is worse: a real room comes out as several hundred boxes, and
 two simulators each approximating several hundred boxes is more surface to
 disagree on, not less. One mesh is loaded by both of them from the same file.
 
+## Colour is manifest data
+
+A body's `material:` is read by both generators and written in each one's own
+dialect — SDF `<ambient>`/`<diffuse>`/`<specular>` for Gazebo, a bound
+`UsdPreviewSurface` for Isaac Sim.
+
+```yaml
+material: Gazebo/Green                                  # a stock Gazebo name
+material: {color: [0.45, 0.30, 0.17], roughness: 0.6}   # or the numbers
+material: asset                                         # or the mesh's own .mtl
+```
+
+It did not always work this way, and the failure is worth recording. The
+manifest used to carry only a Gazebo material *script name*, which the SDF
+generator pasted into a `<script>` block. That is an Ogre token: it means
+something to Gazebo and nothing to anything else, so **every Isaac Sim stage
+rendered grey** while the Gazebo one looked correct — two representations that
+disagreed about something no check was looking at.
+
+So the names are now resolved to RGB in `worlds.PALETTE`, using the values in
+Gazebo 11's own `media/materials/scripts/gazebo.material`, and both backends
+read the result. A stock name still works, because upstream SDF is full of them;
+it just means the same thing on both sides now.
+
+`asset` — the default for a mesh — keeps whatever the geometry file brought, so
+a prop exported with an `.mtl` is not clobbered by a manifest that says nothing
+about it. An explicit `material:` always wins; on the USD side it binds
+`strongerThanDescendants` for exactly that reason.
+
+`build_world_usd.py` reports the number of shaded prims and `check_worlds.py`
+compares the two generated files, because a stage that renders grey loads,
+collides and measures perfectly and fails nothing else.
+
+## Props you cannot make from boxes
+
+A room is boxes. A chair is not: it has a curved back, and its convex hull is a
+solid wedge that fills the space a robot could drive under. Same for a round bin
+rim, a tapered table leg, a shelf's open bays.
+
+`worlds/small_office` is the worked example — walls and a partition written by
+hand as six boxes, and six props as meshes:
+
+```yaml
+  - name: chair_north
+    geometry: {type: mesh, uri: meshes/chair.obj, scale: [1.0, 1.0, 1.0]}
+    xyz: [1.6, -0.55, 0.0]
+    rpy: [0, 0, 3.14159]
+    material: {color: [0.25, 0.28, 0.33], roughness: 0.7}
+```
+
+The props are the AWS RoboMaker small-house meshes, under **MIT-0** — no
+attribution condition, so they can simply be committed. `osrf/gazebo_models` is
+the better-known source and was rejected: it is CC-BY 3.0, and it has no chair
+of any kind. Its `bookshelf`, `cabinet` and `table` are not meshes at all but
+SDF box assemblies, which you can transcribe straight into `bodies:` if that is
+all you need.
+
+```bash
+git clone --depth 1 -b ros2 \
+  https://github.com/aws-robotics/aws-robomaker-small-house-world /tmp/aws
+scripts/dae_to_obj.py /tmp/aws/models/aws_robomaker_residential_ChairD_01/meshes/aws_ChairD_01_visual.DAE \
+  -o worlds/my_world/meshes/chair.obj
+```
+
+Take the `_visual.DAE`, never the `_collision.DAE`: the two carry different root
+transforms, and at 360-760 triangles the visual mesh is cheap enough to serve as
+exact collision geometry directly. Record what you took and under what licence —
+`worlds/small_office/meshes/SOURCE.md` is the pattern.
+
 ## Why OBJ
 
 Not a preference — a requirement on one side and the right answer on the other.
@@ -139,9 +208,22 @@ is Collada, convert it once:
 scripts/dae_to_obj.py worlds/my_world/meshes/room.dae
 ```
 
-which bakes the declared `<unit>` into the vertices (OBJ has no unit field) and
-prints the resulting bounds so you can check them against your manifest's
-`verify` block. Then point the manifest at the `.obj` and delete the `.dae`:
+which bakes the declared `<unit>` into the vertices (OBJ has no unit field),
+applies the visual scene's node transforms, and prints the resulting bounds so
+you can check them against your manifest's `verify` block.
+
+Applying the node transforms matters more than it sounds. The converter used to
+read `library_geometries` directly and merely warn that a `<matrix>` was being
+ignored, and on a real prop that produces geometry which is *structurally* wrong
+and *dimensionally* plausible. `gazebo_models`' `cafe_table.dae` instances its
+tabletop under a separate `+29 inch` Z translate: with the transform dropped,
+the top lands at z = 0.00-0.04 m — lying on the floor — while the overall height
+comes out 0.737 m against a correct 0.775 m. A 38 mm difference in the bounding
+box, which is to say `verify` would have passed it.
+
+Because the root transform is baked in, a converted prop takes
+`scale: [1, 1, 1]`, sits with its base at z = 0, and is placed by its footprint
+centre. Then point the manifest at the `.obj` and delete the `.dae`:
 two files holding the same geometry is the thing this registry exists to
 prevent.
 
@@ -213,6 +295,7 @@ For a measured room, or anything simpler than a scan:
        geometry: {type: mesh, uri: meshes/office.obj, scale: [1, 1, 1]}
        xyz: [0, 0, 0]
        rpy: [0, 0, 0]
+       material: asset            # keep the mesh's own .mtl
    ```
 
    Besides `mesh`, the generators understand `cylinder` (`radius`, `length`),
