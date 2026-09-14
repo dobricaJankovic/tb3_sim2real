@@ -246,7 +246,7 @@ def slice_segments(tris, z):
     return segs
 
 
-def rasterise(world, res):
+def rasterise(world):
     """Occupied-cell set of the manifest at LIDAR_Z, or None if not possible."""
     grid = set()
     step = None
@@ -340,7 +340,7 @@ def check_footprint(world, res):
         res.note('no map declared; footprint check skipped')
         return
 
-    model = rasterise(world, res)
+    model = rasterise(world)
     if model is None:
         res.note('geometry needs a mesh library to rasterise; footprint check '
                  'skipped (the Isaac stage bounds check covers scale and axes)')

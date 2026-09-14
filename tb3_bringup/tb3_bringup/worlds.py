@@ -127,6 +127,11 @@ class World:
                 raise RuntimeError(
                     f'world: {path} has artifacts.{backend}.mode={mode!r}; '
                     f'expected one of {", ".join(MODES)}')
+            if mode == 'adopted' and not (spec or {}).get('path'):
+                raise RuntimeError(
+                    f'world: {path} has artifacts.{backend}.mode=adopted but no '
+                    f'path. An adopted artifact is one that is authored '
+                    f'elsewhere, so it has to say where.')
         return cls(d, m)
 
     # -- the manifest -------------------------------------------------------

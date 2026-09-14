@@ -976,3 +976,179 @@ this repo.
 **Lesson worth keeping.** Context discipline is not only about what a session
 reads; it is about whether the first file it reads is *enough*. A CLAUDE.md that
 carries rules but not the subject guarantees a survey before any work starts.
+
+## 2026-09-14 (later) — the Isaac side becomes an import, and worlds get a source of truth that reaches the real room
+
+Three things were tangled together and came apart in one pass: a stale copy of a
+package, a `world:=` that only half the backends honoured, and no answer to
+"how does a real room get into both simulators".
+
+### The copy was four worlds and an Isaac Sim version behind
+
+`turtlebot3_isaacsim/` in this tree was a snapshot taken when the package split
+out on 2026-09-13. By the time it was removed the real repository had the
+warehouse, a simple room and a kitchen, `scripts/build_map.py` (Isaac Sim's own
+occupancy-map generator behind a CLI), a committed burger asset, and a container
+on Isaac Sim **6.1.0** — against this copy's 6.0.1.
+
+It is now a source dependency: `tb3_sim2real.repos` pins it and NVIDIA's
+`isaacsim_bringup`, and `scripts/workspace.sh` imports both into a gitignored
+`src/`. Two things about that script are not obvious:
+
+- NVIDIA ship nine packages per distro in `humble_ws/` and `jazzy_ws/`, so
+  `isaacsim_bringup` appears **twice** and colcon refuses the whole build on a
+  duplicate package name before compiling anything. The script drops a
+  `COLCON_IGNORE` in every package except `${ROS_DISTRO}_ws`'s copy.
+- `vcs import <dir>` prefixes the manifest's keys with `<dir>`, so keys written
+  as `src/foo` and imported into `src` land in `src/src/foo`. Keys are bare
+  names.
+
+`docker/isaacsim-ros2/` went the same way, and that was the sharper call: it was
+byte-identical to the imported package's copy except for the Isaac Sim tag, and
+ours was the stale side. The base image is now built from
+`src/turtlebot3_isaacsim/docker/isaacsim-ros2/Dockerfile.humble` and `docker/`
+here is one thin layer — TurtleBot3, Gazebo Classic's worlds, the real robot's
+drivers, cartographer, the workspace.
+
+**Pinned to `IsaacSim-6.0.1` on purpose while Isaac Sim is 6.1.0.** The 6.1.0
+tag reimplements `run_isaacsim.launch.py` as `run_isaacsim.launch.xml` —
+argument for argument the same file, different name and source type — and
+`turtlebot3_isaacsim` includes it by the old name, so a 6.1.0 pin dies with a
+bare `[Errno 2] No such file or directory`. Not a runtime mismatch: the package
+passes `install_path=/isaac-sim`, which overrides the launcher's own `version`
+default, so the 6.0.1 launcher starts the 6.1.0 install. Moving it forward is
+two lines in that package (`AnyLaunchDescriptionSource` and the new filename)
+and belongs there.
+
+### `world:=` now means one thing
+
+It used to be refused for `backend:=isaacsim`, and honestly so: that backend
+only *attached* to a simulator someone had already started with the right stage,
+so accepting a world would have been a lie. `backends/isaacsim.launch.py` now
+includes the imported package's `isaacsim.launch.py`, which includes NVIDIA's
+`run_isaacsim.launch.py`, so Kit comes up behind the same `ros2 launch` as
+everything else and the ROS side genuinely chooses the environment.
+
+`world:=` therefore names an environment on all three backends — gzserver loads
+its `.world`, Kit opens its `.usd`, the real robot loads nothing — and all three
+take the spawn pose and the Nav2 map from the same manifest. It also accepts a
+**path**, so a user's own world directory needs no entry in this repository.
+
+Fallout worth recording:
+
+- Gazebo spawns through `spawn_entity.py` directly now. Upstream's
+  `spawn_turtlebot3.launch.py` takes `x_pose` and `y_pose` only and pins z, so a
+  manifest yaw was silently dropped on Gazebo while Isaac Sim honoured it — two
+  simulators at different headings from one manifest.
+- The three `nav2_<backend>.yaml` were byte-identical copies of upstream's
+  `burger.yaml`. One `nav2_params.yaml` now, with `bringup.launch.py` preferring
+  `nav2_<backend>.yaml` the day one exists. Three files that must be kept in
+  step are a worse record of "they do not differ yet" than one file.
+- `tb3_bringup/maps/` held the stock map, which belongs to the *environment*.
+  It moved to `worlds/turtlebot3_world/map/` and the manifest points at it.
+
+### Cloning a real room: the map is the reference
+
+The research question was what a normal TurtleBot3 user actually has that
+describes their environment metrically. The answer is the occupancy map they had
+to record for Nav2 anyway: it is in the frame Nav2 works in, at the planner's
+resolution, and it records exactly the geometry the robot's own lidar can see.
+
+`scripts/clone_world.py` reads it, extrudes the occupied cells into one OBJ
+(interior faces culled, so a wall costs its surface and not its volume), and
+writes a world directory with the map copied in beside the mesh.
+`scripts/build_world.sh` then produces both simulators' representations from
+that manifest — no second authoring step, no second source of truth.
+
+Decisions behind that, each with a reason that is not aesthetic:
+
+- **Not USD or SDF as the single format.** Gazebo Classic has no USD code path,
+  and `gz-usd` targets gz-sim, has no releases, needs OpenUSD 24.08 built from
+  source, and has had no commit since 2024-10. Isaac Sim 6.x ships importers for
+  URDF, MJCF, Onshape and CAD — none for SDF. URDF has no world concept and its
+  Isaac importer builds an articulation with rigid bodies, the opposite of a
+  static room.
+- **OBJ, not Collada.** Gazebo Classic's mesh loader reads `dae/obj/stl`; Isaac
+  Sim's converter reads `obj/fbx/gltf`. OBJ is the intersection, and it carries
+  neither a unit scale nor an up-axis for the two to read differently — which is
+  precisely the trap `turtlebot3_world`'s meshes already document.
+- **One mesh, not a few hundred boxes.** Rectangle-decomposing a real room's
+  grid gives hundreds of boxes, and two simulators each approximating hundreds
+  of boxes is *more* surface to disagree on, not less.
+- **Not a 3D scan.** A phone scan is a two-million-triangle non-manifold shell
+  that neither ODE nor PhysX collides with usefully. Keep it as a visual body if
+  you want it; let the extrusion carry collision.
+- **Stdlib and PyYAML only.** Reading a PGM and walking a grid does not need
+  OpenCV, and a dependency a student has to install is a step they can fail.
+
+What the clone captures is a **floor plan**, not a model of the room: a table
+top, an overhang or a step is not in the map and so not in the clone. Those are
+extra bodies, measured by hand, in the same manifest.
+
+### `scripts/check_worlds.py`, and what it actually catches
+
+Three ways one world quietly becomes two, each verified against a deliberately
+broken copy:
+
+1. *Manifest edited, artifacts not regenerated.* Both generated files carry the
+   manifest's sha256 — in the `.world`'s XML header and the USD's
+   `customLayerData`. (The USD check greps the bytes rather than depending on a
+   USD reader; the digest is stored literally in usdc as in usda.)
+2. *A generated file edited by hand, header intact.* The `.world` is parsed back
+   with ElementTree and compared body by body against the manifest.
+3. *The model no longer describes the real room.* The manifest is rasterised at
+   the burger's 0.182 m beam height and compared with the world's own map.
+
+The third needed one correction to be useful. Cell-exact IoU scored a *correct*
+clone at 0.42, because a wall one cell thick in the map is a surface with two
+sides in the model and the two land in neighbouring cells. Comparing with one
+cell of slack in both directions, and reporting "how much of the map is
+modelled" and "how much of the model is not in the map" separately, scores the
+same clone 100%/0% — and a map mirrored about its x axis, which is a real bug
+that plans and drives without looking broken, at 22%/80%.
+
+It deliberately does not parse USD: that needs Kit or `usd-core`, and a check
+that needs installing is a check that gets skipped. The Isaac stage is verified
+where it is written instead, by `build_world_usd.py`'s bounds and collider
+assertions.
+
+### Two bugs found by actually running it
+
+**`turtlebot3_node` aborts without a `namespace` parameter.** It declares it
+statically with no default, so `backend:=real` died with `Statically typed
+parameter 'namespace' must be initialized` before touching the serial port.
+Upstream's `robot.launch.py` passes `{'namespace': namespace}`; this backend had
+lifted the node without it. It now reaches `Failed to open the port
+(/dev/ttyACM0)`, which is the correct failure with no OpenCR attached.
+
+**An `OnProcessExit` handler without `handle_once` brings Nav2 up twice.** Nav2
+is now started when `wait_for_sim` exits rather than beside it, so it comes up
+when `/clock` exists rather than two minutes before it on a cold shader cache.
+Left registered, the handler ran `bringup_launch.py` again on a later matching
+exit and loaded every composable node into a second `nav2_container`. The
+symptom names neither cause: a wall of `Transition is not registered` from
+`map_server` and `amcl`, then `Node '/local_costmap/local_costmap' has already
+been added to an executor`, then both containers aborting. The tell was that
+every "Creating" line in the log appeared exactly twice under a single launch
+action index.
+
+A third thing, not a bug but a trap: a leftover `gzserver` from an earlier test
+makes the next `backend:=gazebo` die with exit code 255 and nothing else.
+`pkill -INT -f "ros2 launch"` does not take gzserver with it.
+
+### Measured
+
+Both simulated backends, from the ROS side, `world:=turtlebot3_world`:
+`/clock` 10.0 / 56.1 Hz, `/scan` 5.0 / 3.5 Hz, `/odom` 29.4 / 66.0 Hz,
+`/joint_states` 29.4 / 56.5 Hz (gazebo / isaacsim). Isaac's `/scan` returns the
+arena — real ranges from 0.60 m, not an empty plane. `nav:=true` on Gazebo
+brings the whole stack up with zero errors against the map now served out of
+`worlds/turtlebot3_world/map/`.
+
+One difference worth not mistaking for a fault: the `odom` frame does not start
+in the same place. Gazebo's diff-drive plugin puts `odom` at the world origin,
+Isaac Sim's `IsaacComputeOdometry` puts it at the robot. Both are valid; AMCL
+resolves it into `map->odom`; it only bites if raw `/odom` is compared between
+backends without saying which frame is meant.
+
+Net: 47 tracked files where there were 67, about 2,500 lines fewer.
