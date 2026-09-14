@@ -36,6 +36,7 @@ setup(
     entry_points={
         'console_scripts': [
             'wait_for_sim = tb3_bringup.wait_for_sim:main',
+            'drive_test = tb3_bringup.drive_test:main',
         ],
     },
 )
