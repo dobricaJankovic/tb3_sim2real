@@ -1,0 +1,35 @@
+# empty_stage — a ground plane and a light, and nothing else.
+#
+# The right first run on any backend: it proves the simulator starts, the robot
+# spawns and the ROS 2 interface comes up, without a world being able to be the
+# thing that is wrong. There is nothing to navigate, so run it with nav:=false.
+#
+#   ros2 launch tb3_bringup bringup.launch.py backend:=gazebo   world:=empty_stage nav:=false
+#   ros2 launch tb3_bringup bringup.launch.py backend:=isaacsim world:=empty_stage nav:=false
+#
+# `/scan` is advertised but stays silent here on both backends: the beam is
+# horizontal and an empty world is an infinite floor with nothing standing on
+# it, so no ray returns anything. That is correct behaviour, not a broken lidar.
+
+name: empty_stage
+description: >-
+  A bare ground plane with a light. No obstacles, no map.
+
+spawn:
+  xyz: [0.0, 0.0, 0.01]
+  yaw: 0.0
+
+# The two backends are empty in different ways, and this is the clearest case
+# for why `artifacts` exists.
+#
+#   gazebo    still needs a file: a .world is where model://ground_plane and
+#             model://sun are included, so the generator writes one from the
+#             (empty) body list below.
+#   isaacsim  needs no file at all. turtlebot3_isaacsim authors the ground plane
+#             itself, with a physics material it controls, so an environment
+#             reference would only be a second, coincident floor.
+artifacts:
+  gazebo: {mode: generated}
+  isaacsim: {mode: none}
+
+bodies: []

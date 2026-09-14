@@ -1,8 +1,10 @@
 """Nav2 + RViz — identical for all three backends.
 
-Only the params file differs (passed in by bringup.launch.py as
-config/nav2_<backend>.yaml). Structure is the same; tuning is not, and that
-difference is precisely the sim-to-real gap we want to be able to measure.
+Everything that varies is passed in by bringup.launch.py: the params file
+(config/nav2_<backend>.yaml where one exists, else config/nav2_params.yaml) and
+the map (the world manifest's, unless map:= overrides it). Structure is the
+same for every backend; tuning is not, once it diverges, and that difference is
+precisely the sim-to-real gap we want to be able to measure.
 """
 
 import os
@@ -28,10 +30,8 @@ def generate_launch_description():
         DeclareLaunchArgument('rviz', default_value='true'),
         DeclareLaunchArgument(
             'params_file',
-            default_value=os.path.join(pkg, 'config', 'nav2_real.yaml')),
-        DeclareLaunchArgument(
-            'map',
-            default_value=os.path.join(pkg, 'maps', 'map.yaml')),
+            default_value=os.path.join(pkg, 'config', 'nav2_params.yaml')),
+        DeclareLaunchArgument('map', description='Occupancy map for Nav2'),
 
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(os.path.join(nav2_launch_dir, 'bringup_launch.py')),

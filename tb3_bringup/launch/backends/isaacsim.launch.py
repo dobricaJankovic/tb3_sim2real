@@ -1,71 +1,69 @@
-"""Isaac Sim backend — attach only.
+"""Isaac Sim backend.
 
-The simulator is started separately (`isaacsim-python /scripts/tb3_sim.py`) and
-reaches us over DDS; there is deliberately nothing to spawn here. This mirrors
-NVIDIA's carter_navigation.launch.py, which assumes the simulator is already
-running and playing on the DDS domain.
+Starts the simulator, rather than waiting for someone to have started it. It
+does that by including turtlebot3_isaacsim, a peer of turtlebot3_gazebo
+developed in its own repository and imported here by scripts/workspace.sh —
+which in turn includes NVIDIA's isaacsim_bringup/run_isaacsim.launch.py, the
+supported way to put Kit behind a `ros2 launch`.
 
-Starting Kit from a launch file is possible now that ros2 and isaac-sim.sh share
-a filesystem — that is what isaacsim_bringup/run_isaacsim.launch.py does, and
-what the planned turtlebot3_isaacsim package will build on. It is deliberately
-not done here; see docs/status.md.
+That package owns the robot asset, the OmniGraph that publishes the interface
+contract, the RTX lidar profile and the physics materials. This file owns
+nothing but the translation from a world manifest into its arguments, which is
+the whole reason `backend:=isaacsim world:=X` can now mean what
+`backend:=gazebo world:=X` means.
 
-Isaac Sim supplies: /clock, /scan, /odom, /joint_states, tf odom->base_footprint,
-/cmd_vel sink — all from OmniGraph nodes built by isaac/scripts/tb3_sim.py.
-Those nodes only produce data while the sim is PLAYING.
+Supplies: /clock, /scan, /odom, /joint_states, tf odom->base_footprint,
+/cmd_vel sink. Deliberately does not include robot_state_publisher — that is in
+common/, shared with the other two backends — so turtlebot3_isaacsim's own
+robot_state_publisher.launch.py is bypassed by including its isaacsim.launch.py
+rather than one of its per-world launch files.
+
+`world` arrives already resolved by bringup.launch.py. An EMPTY string is
+meaningful and is what `empty_stage` produces: no environment reference, and
+the simulator authors its own ground plane and light.
 """
 
+import os
+
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
-from launch.conditions import IfCondition
-from launch_ros.actions import Node
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 
 
 def generate_launch_description():
-    use_sim_time = LaunchConfiguration('use_sim_time')
+    try:
+        pkg = get_package_share_directory('turtlebot3_isaacsim')
+    except Exception as e:                       # PackageNotFoundError
+        raise RuntimeError(
+            'backend:=isaacsim needs the turtlebot3_isaacsim package, which is '
+            'a source dependency of this repository rather than part of it.\n'
+            '  scripts/workspace.sh              # fetch it into src/\n'
+            '  colcon build --symlink-install\n'
+            f'  ({e})')
 
     return LaunchDescription([
         DeclareLaunchArgument('use_sim_time', default_value='true'),
         DeclareLaunchArgument(
-            'wait_for_sim', default_value='true',
-            description='Block until /clock appears, so the logs say "no simulator" '
-                        'instead of Nav2 silently hanging'),
+            'world', default_value='',
+            description='Path to the environment .usd; empty for a ground plane'),
         DeclareLaunchArgument(
-            'pointcloud_to_laserscan', default_value='false',
-            description='Set true only if the Isaac scene publishes PointCloud2 '
-                        'instead of a LaserScan. Prefer the LaserScan writer so '
-                        '/scan matches the real LDS-02 and no extra node is needed.'),
+            'world_z', default_value='0.0',
+            description='Metres to raise the stage by so its floor meets z = 0'),
+        DeclareLaunchArgument('x_pose', default_value='0.0'),
+        DeclareLaunchArgument('y_pose', default_value='0.0'),
+        DeclareLaunchArgument('z_pose', default_value='0.01'),
+        DeclareLaunchArgument('yaw', default_value='0.0'),
+        DeclareLaunchArgument('headless', default_value='false'),
 
-        Node(
-            package='tb3_bringup',
-            executable='wait_for_sim',
-            name='wait_for_sim',
-            output='screen',
-            condition=IfCondition(LaunchConfiguration('wait_for_sim')),
-        ),
-
-        # Fallback path, off by default. Topic names and frame here are Carter's
-        # and are WRONG for TB3 — fix if we ever turn this on.
-        Node(
-            package='pointcloud_to_laserscan',
-            executable='pointcloud_to_laserscan_node',
-            name='pointcloud_to_laserscan',
-            condition=IfCondition(LaunchConfiguration('pointcloud_to_laserscan')),
-            remappings=[('cloud_in', '/point_cloud'), ('scan', '/scan')],
-            parameters=[{
-                'use_sim_time': use_sim_time,
-                'target_frame': 'base_scan',
-                'transform_tolerance': 0.01,
-                'min_height': -0.1,
-                'max_height': 0.5,
-                'angle_min': -3.1415,
-                'angle_max': 3.1415,
-                'angle_increment': 0.0175,
-                'scan_time': 0.2,
-                'range_min': 0.12,
-                'range_max': 3.5,
-                'use_inf': True,
-            }],
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(pkg, 'launch', 'isaacsim.launch.py')),
+            launch_arguments={
+                k: LaunchConfiguration(k) for k in (
+                    'world', 'world_z', 'x_pose', 'y_pose', 'z_pose', 'yaw',
+                    'headless')
+            }.items(),
         ),
     ])

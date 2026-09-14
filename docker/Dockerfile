@@ -1,17 +1,18 @@
 # The tb3_sim2real image: TurtleBot3 on top of Isaac Sim + ROS 2 Humble.
 #
-# Two Dockerfiles, deliberately:
+# One thin layer, deliberately. The base -- NVIDIA's official
+# nvcr.io/nvidia/isaac-sim:6.1.0 with ROS 2 Humble added, plus the `isaacsim`
+# and `isaacsim-python` wrappers that run ros-isolate -- is not built here. It
+# is built from src/turtlebot3_isaacsim/docker/isaacsim-ros2/Dockerfile.humble,
+# the same definition that package uses to run standalone, because this
+# repository imports that package rather than copying it and the same has to be
+# true of the environment it needs. scripts/build_images.sh builds both in order.
 #
-#   docker/isaacsim-ros2/Dockerfile.humble  Isaac Sim + ROS 2 Humble, and
-#       nothing else. No TurtleBot3, no X11, no workspace overlay. It stands on
-#       its own and is not specific to this repo.
-#   this file                               everything that IS specific to us:
-#       the TurtleBot3 description, the real-robot drivers, the sim worlds, and
-#       the workspace the bringup package is built in.
-#
-# The base is built first; scripts/build_images.sh does both in order.
+# What is left here is exactly what is specific to sim-to-real and absent from a
+# pure Isaac Sim image: Gazebo Classic's TurtleBot3 worlds, the real robot's
+# drivers, cartographer, and the workspace tb3_bringup is built in.
 
-ARG BASE_IMAGE=isaacsim6-humble:ngc
+ARG BASE_IMAGE=isaacsim61-humble:ngc
 FROM ${BASE_IMAGE}
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -24,6 +25,10 @@ ENV COLCON_WS=/ws
 # gazebo-ros-pkgs, gazebo-ros2-control, xacro, tf2-tools,
 # pointcloud-to-laserscan, colcon and vcstool. Audited against the built image
 # rather than assumed, so this list is only the remainder.
+#
+# vcstool comes from the base and is what scripts/workspace.sh needs, so the
+# source dependencies can be imported from inside the container on a host that
+# has no ROS 2 installed at all.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-${ROS_DISTRO}-joint-state-publisher \
     ros-${ROS_DISTRO}-cartographer \
@@ -46,10 +51,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-${ROS_DISTRO}-ld08-driver \
     ros-${ROS_DISTRO}-coin-d4-driver \
  && rm -rf /var/lib/apt/lists/*
-
-# TODO: if we end up needing the local turtlebot3_ws sources instead of the
-# apt packages (patched drivers, coin_d4_driver, etc), clone or bind-mount them
-# into ${COLCON_WS}/src and drop the apt lines above.
 
 WORKDIR ${COLCON_WS}
 RUN mkdir -p ${COLCON_WS}/src

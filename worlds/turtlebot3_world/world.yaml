@@ -3,10 +3,12 @@
 # THIS FILE IS THE SOURCE OF TRUTH. The Gazebo .world and the Isaac Sim .usd are
 # both GENERATED from it, so the two simulators cannot drift apart:
 #
-#   scripts/build_world.py <name>                 -> <name>.world  (SDF, committed)
-#   isaac/scripts/build_world_usd.py --world <n>  -> <name>.usd    (gitignored)
+#   scripts/build_world.sh <name>   -> <name>.world      (SDF, committed)
+#                                   -> isaac/<name>.usd  (gitignored)
 #
-# Edit this, then regenerate both. Never hand-edit a generated file.
+# Edit this, then regenerate both. Never hand-edit a generated file:
+# scripts/check_worlds.py records this file's hash in the .world header and
+# fails if the two stop matching.
 #
 # The geometry under meshes/ is shared byte-for-byte between the two backends —
 # that is the whole point of the layout. Only the wrappers differ.
@@ -20,10 +22,15 @@ description: >-
   obstacles on a 3x3 grid, with five decorative hexagons outside the wall.
 
 # Where the robot starts. Matches turtlebot3_world.launch.py's x_pose/y_pose, so
-# Gazebo and Isaac Sim runs are comparable from the same initial pose.
+# Gazebo, Isaac Sim and real runs are comparable from the same initial pose.
 spawn:
   xyz: [-2.0, -0.5, 0.01]
   yaw: 0.0
+
+# The Nav2 map of this environment, used by every backend. Upstream's recording
+# of the real arena, out of turtlebot3_navigation2; its frame coincides with the
+# world origin, so `spawn` above is also the initial pose to hand AMCL.
+map: map/map.yaml
 
 # Every body here is STATIC (upstream sets <static>1</static>): collider plus
 # visual, no rigid-body dynamics. Generators must not attach a rigid body.

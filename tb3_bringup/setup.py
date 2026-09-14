@@ -22,7 +22,8 @@ setup(
         (share('launch', 'backends'), glob('launch/backends/*.launch.py')),
         (share('launch', 'common'), glob('launch/common/*.launch.py')),
         (share('config'), glob('config/*.yaml')),
-        (share('maps'), glob('maps/*.yaml') + glob('maps/*.pgm')),
+        # No maps/ here: a map belongs to an environment, not to this package,
+        # so it lives in the world's own directory (worlds/<name>/map/).
         (share('rviz'), glob('rviz/*.rviz')),
     ],
     install_requires=['setuptools'],

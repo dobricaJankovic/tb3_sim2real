@@ -1,15 +1,24 @@
-"""Resolve worlds out of the repo's world registry.
+"""The world registry: one environment, three backends.
 
-One environment, two simulators. `worlds/<name>/world.yaml` is the source of
-truth; the Gazebo `.world` and the Isaac Sim `.usd` beside it are both generated
-from it, and the meshes under `worlds/<name>/meshes/` are shared byte-for-byte.
-Adding an environment is therefore a matter of adding a directory, never of
-editing launch files — which is the reason this module exists at all.
+A *world* is a directory holding `world.yaml` plus whatever that manifest
+points at. The manifest is the source of truth; the Gazebo `.world` and the
+Isaac Sim `.usd` are representations of it, and `tb3_bringup` never reads
+anything else. That is what makes `world:=` mean the same thing whichever
+backend is running:
 
-The registry is a plain directory tree rather than an ament package because the
-Isaac side runs under Kit's own interpreter with the system ROS 2 stripped out
-(ros-isolate), so it cannot call get_package_share_directory. Both sides find
-the tree through TB3_WORLDS_DIR and genuinely read the same files.
+    backend:=gazebo    -> load the world's .world in gzserver
+    backend:=isaacsim  -> open the world's .usd in Kit
+    backend:=real      -> nothing to load; the world contributes its map
+
+`world:=` takes a registry name (`turtlebot3_world`) or a path to a world
+directory (`/home/me/my_office`). The path form is what makes a user's own
+environment a first-class citizen without adding it to this repository.
+
+This module is plain Python with PyYAML and no ROS import on purpose: the
+generators run under Isaac Sim's own interpreter, where the system ROS 2 is
+deliberately stripped off the search path (ros-isolate) and
+`get_package_share_directory` does not exist. Both sides find the registry the
+same way and genuinely read the same files.
 """
 
 import os
@@ -17,9 +26,19 @@ import os
 import yaml
 
 #: Where the registry is mounted in the container. Overridable so the
-#: generators and tests can run against a checkout on the host.
+#: generators, the tests and a user's own registry can live elsewhere.
 ENV_VAR = 'TB3_WORLDS_DIR'
 DEFAULT_ROOT = '/worlds'
+
+MANIFEST = 'world.yaml'
+
+#: How a backend gets its representation of a world.
+#:   generated  a generator writes it from the manifest (the normal case)
+#:   adopted    the artifact is authored elsewhere and only validated here
+#:   none       this backend needs no file at all
+MODES = ('generated', 'adopted', 'none')
+
+BACKENDS = ('real', 'gazebo', 'isaacsim')
 
 
 def root():
@@ -40,73 +59,181 @@ def available(worlds_root=None):
     if not os.path.isdir(r):
         return []
     return sorted(n for n in os.listdir(r)
-                  if os.path.isfile(os.path.join(r, n, 'world.yaml')))
+                  if os.path.isfile(os.path.join(r, n, MANIFEST)))
 
 
-def _fail(msg, worlds_root):
-    raise RuntimeError(
-        f'{msg}\n'
-        f'  registry: {worlds_root}\n'
-        f'  available: {", ".join(available(worlds_root)) or "(none)"}\n'
-        f'  If that list is empty the registry is probably not mounted; '
-        f'check the worlds volume in docker-compose.yml or set {ENV_VAR}.')
+def locate(name_or_path, worlds_root=None):
+    """Resolve `world:=` to a world directory.
 
-
-def manifest(name, worlds_root=None):
-    """Parsed world.yaml for `name`."""
-    r = worlds_root or root()
-    path = os.path.join(r, name, 'world.yaml')
-    if not os.path.isfile(path):
-        _fail(f"unknown world '{name}': no {name}/world.yaml", r)
-    with open(path) as f:
-        return yaml.safe_load(f)
-
-
-def world_file(name, worlds_root=None):
-    """Generated Gazebo .world for `name`.
-
-    Missing means build_world.py was never run for it (or the generated file was
-    not committed). Say so explicitly: gzserver's own failure for a missing world
-    is to come up with an empty scene and no error, which is unreadable.
+    A path wins over a name, so a directory called `turtlebot3_world` sitting in
+    your home directory is reachable as `world:=./turtlebot3_world` even though
+    the registry has one by that name.
     """
     r = worlds_root or root()
-    path = os.path.join(r, name, f'{name}.world')
-    if not os.path.isfile(path):
-        _fail(f"world '{name}' has no generated {name}.world "
-              f"(run: scripts/build_world.py {name})", r)
-    return path
+
+    expanded = os.path.expanduser(name_or_path)
+    if os.sep in expanded or expanded in ('.', '..'):
+        d = os.path.abspath(expanded)
+        if not os.path.isfile(os.path.join(d, MANIFEST)):
+            raise RuntimeError(
+                f'world: {d} is not a world directory (no {MANIFEST} in it).\n'
+                f'  A world directory holds {MANIFEST} plus the artifacts it '
+                f'names. See worlds/README.md.')
+        return d
+
+    d = os.path.join(r, name_or_path)
+    if not os.path.isfile(os.path.join(d, MANIFEST)):
+        raise RuntimeError(
+            f"world: unknown world '{name_or_path}'\n"
+            f'  registry: {r}\n'
+            f'  available: {", ".join(available(r)) or "(none)"}\n'
+            f'  world:= takes a registry name or a path to a world directory.\n'
+            f'  If that list is empty the registry is probably not mounted; '
+            f'check the worlds volume in docker-compose.yml or set {ENV_VAR}.')
+    return d
 
 
-def usd_file(name, worlds_root=None):
-    """Generated Isaac Sim .usd for `name`. Not checked for existence here.
+class World:
+    """A loaded world manifest, and where each backend's representation lives."""
 
-    The USD is gitignored and built by scripts/build_world_usd.sh, so a fresh
-    checkout has none and a caller on the ROS side cannot verify it.
-    """
-    r = worlds_root or root()
-    return os.path.join(r, name, 'isaac', f'{name}.usd')
+    def __init__(self, directory, manifest):
+        self.dir = directory
+        self.manifest = manifest
+        self.name = manifest['name']
 
+    # -- loading ------------------------------------------------------------
 
-def spawn(name, worlds_root=None):
-    """Robot start pose as (x, y, z, yaw).
+    @classmethod
+    def load(cls, name_or_path, worlds_root=None):
+        d = locate(name_or_path, worlds_root)
+        path = os.path.join(d, MANIFEST)
+        with open(path) as f:
+            m = yaml.safe_load(f) or {}
 
-    Shared by both backends so a Gazebo run and an Isaac Sim run of the same
-    world start from the same place; otherwise Nav2 comparisons between them are
-    not comparing anything.
-    """
-    m = manifest(name, worlds_root)
-    s = m.get('spawn') or {}
-    xyz = list(s.get('xyz', [0.0, 0.0, 0.0]))
-    xyz += [0.0] * (3 - len(xyz))
-    return xyz[0], xyz[1], xyz[2], float(s.get('yaw', 0.0))
+        name = m.get('name')
+        if name != os.path.basename(d):
+            raise RuntimeError(
+                f'world: {path} declares name={name!r} but lives in '
+                f'{os.path.basename(d)}/. They must match — the directory name '
+                f'is what `world:=` and Gazebo\'s model:// URIs resolve on.')
 
+        for backend, spec in (m.get('artifacts') or {}).items():
+            if backend not in ('gazebo', 'isaacsim'):
+                raise RuntimeError(
+                    f'world: {path} has artifacts.{backend}; expected one of '
+                    f'gazebo, isaacsim. (backend:=real loads no world file.)')
+            mode = (spec or {}).get('mode', 'generated')
+            if mode not in MODES:
+                raise RuntimeError(
+                    f'world: {path} has artifacts.{backend}.mode={mode!r}; '
+                    f'expected one of {", ".join(MODES)}')
+        return cls(d, m)
 
-def resolve(name_or_path, worlds_root=None):
-    """Accept either a registry name or a direct path to a .world file.
+    # -- the manifest -------------------------------------------------------
 
-    The path form is an escape hatch for a one-off file that is not worth adding
-    to the registry; `world:=` is otherwise a name.
-    """
-    if name_or_path.endswith('.world') and os.path.isfile(name_or_path):
-        return name_or_path
-    return world_file(name_or_path, worlds_root)
+    def artifact(self, backend):
+        """The `artifacts.<backend>` block, with defaults filled in.
+
+        Absent means generated, which is what a world written from the template
+        in worlds/README.md gets: both backends generated from `bodies`.
+        """
+        spec = dict(((self.manifest.get('artifacts') or {}).get(backend)) or {})
+        spec.setdefault('mode', 'generated')
+        if spec['mode'] == 'generated':
+            spec['path'] = {'gazebo': f'{self.name}.world',
+                            'isaacsim': f'isaac/{self.name}.usd'}[backend]
+        return spec
+
+    @property
+    def bodies(self):
+        return self.manifest.get('bodies') or []
+
+    @property
+    def spawn(self):
+        """Robot start pose as (x, y, z, yaw).
+
+        Shared by every backend so that a Gazebo run, an Isaac Sim run and a
+        real run of the same environment start from the same place; otherwise
+        comparisons between them are not comparing anything.
+        """
+        s = self.manifest.get('spawn') or {}
+        xyz = [float(v) for v in s.get('xyz', [0.0, 0.0, 0.0])]
+        xyz += [0.0] * (3 - len(xyz))
+        return xyz[0], xyz[1], xyz[2], float(s.get('yaw', 0.0))
+
+    # -- per-backend representations ----------------------------------------
+
+    def gazebo_world(self):
+        """Path to the SDF world gzserver should load."""
+        spec = self.artifact('gazebo')
+        if spec['mode'] == 'none':
+            raise RuntimeError(
+                f"world: '{self.name}' declares artifacts.gazebo.mode=none, so "
+                f'it cannot be run with backend:=gazebo.')
+        path = os.path.join(self.dir, spec['path'])
+        if not os.path.isfile(path):
+            hint = (f'run: scripts/build_world.py {self.name}'
+                    if spec['mode'] == 'generated' else
+                    f'artifacts.gazebo.path points at {spec["path"]}, which is '
+                    f'not there')
+            raise RuntimeError(
+                f"world: '{self.name}' has no {os.path.basename(path)} — {hint}.\n"
+                f'  (gzserver\'s own failure for a missing world is to come up '
+                f'with an empty scene and no error, which is unreadable.)')
+        return path
+
+    def isaac_usd(self):
+        """What to pass turtlebot3_isaacsim as `world:=`.
+
+        An empty string is meaningful, not an error: it means "no environment
+        reference", and the simulator then authors its own ground plane and
+        light. That is what `empty_stage` is.
+
+        An adopted path may be an Isaac Sim asset-root path
+        (/Isaac/Environments/...) or a URL, neither of which exists on this
+        filesystem, so only local paths are checked.
+        """
+        spec = self.artifact('isaacsim')
+        if spec['mode'] == 'none':
+            return ''
+        path = spec['path']
+        if path.startswith(('/Isaac/', 'http://', 'https://', 'omniverse://')):
+            return path
+        path = os.path.join(self.dir, path)
+        if spec['mode'] == 'generated' and not os.path.isfile(path):
+            raise RuntimeError(
+                f"world: '{self.name}' has no generated "
+                f'{os.path.relpath(path, self.dir)} — run: '
+                f'scripts/build_world.sh {self.name}\n'
+                f'  (the USD is a build product and is not committed; it needs '
+                f'the container.)')
+        return path
+
+    def isaac_world_z(self):
+        """Metres to raise the Isaac stage by so its floor meets z = 0.
+
+        Zero for anything authored floor-at-zero, which is every world this
+        repository generates. Adopted stock environments are not obliged to
+        agree: Simple_Room's floor is at -0.7696. It must match the value the
+        occupancy-map builder is given, or the map is cut from the same room at
+        a different height — which loads in Nav2 and localises the robot into a
+        scene that is not there.
+        """
+        return float(self.artifact('isaacsim').get('world_z', 0.0))
+
+    def map(self):
+        """Path to the Nav2 map for this environment, or None.
+
+        The map is the one artifact all three backends share, and for an
+        environment cloned from a real room it is also the *input* the clone was
+        made from — see worlds/README.md.
+        """
+        rel = self.manifest.get('map')
+        if not rel:
+            return None
+        path = os.path.join(self.dir, rel)
+        if not os.path.isfile(path):
+            raise RuntimeError(
+                f"world: '{self.name}' declares map: {rel}, which is not there "
+                f'({path}).')
+        return path

@@ -1,3 +1,17 @@
+# Nav2 parameters, shared by all three backends.
+#
+# Verbatim ros-humble-turtlebot3-navigation2's param/humble/burger.yaml -- the
+# Humble-specific variant, not the newer one beside it -- so that a run here is
+# comparable with a stock TurtleBot3 run. use_sim_time below is overridden per
+# backend by nav2_bringup's own RewrittenYaml, from the value bringup.launch.py
+# derives from `backend:=`; do not set it by hand.
+#
+# WHEN THE BACKENDS NEED DIFFERENT TUNING, add config/nav2_<backend>.yaml with
+# the whole parameter set and bringup.launch.py will prefer it over this file.
+# Until then there is deliberately one copy: three identical files that must be
+# kept in step are a worse record of "the backends do not differ yet" than one
+# file is, and the delta between them is only interesting once it is real.
+
 amcl:
   ros__parameters:
     use_sim_time: False

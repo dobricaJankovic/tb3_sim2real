@@ -4,12 +4,16 @@
 # compose only builds one image per service, so the base cannot be a compose
 # service without pretending it is something you run.
 #
-#   docker/isaacsim-ros2/Dockerfile.humble -> isaacsim6-humble:ngc
-#       Isaac Sim 6.0 + ROS 2 Humble on Ubuntu 22.04. Generic: no TurtleBot3,
-#       no X11, no workspace. Verify it on its own with
-#       docker/isaacsim-ros2/verify.sh.
-#   docker/ros/Dockerfile                  -> tb3_sim2real/tb3_ros:humble
-#       Everything specific to this repo, layered on top.
+#   src/turtlebot3_isaacsim/docker/isaacsim-ros2/Dockerfile.humble
+#       -> isaacsim61-humble:ngc
+#       Isaac Sim 6.1.0 + ROS 2 Humble on Ubuntu 22.04. Generic: no TurtleBot3,
+#       no X11, no workspace. NOT a file in this repository -- it belongs to the
+#       turtlebot3_isaacsim package, which is imported here rather than copied,
+#       and its container is part of what is imported. Verify it on its own with
+#       src/turtlebot3_isaacsim/docker/isaacsim-ros2/verify.sh.
+#   docker/Dockerfile                  -> tb3_sim2real/tb3_ros:humble
+#       Gazebo Classic's TurtleBot3 worlds, the real robot's drivers, and the
+#       workspace -- everything specific to sim-to-real, layered on top.
 #
 #   scripts/build_images.sh              # both
 #   scripts/build_images.sh --base-only  # just the base, e.g. before verify.sh
@@ -21,18 +25,24 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-BASE_IMAGE="${TB3_BASE_IMAGE:-isaacsim6-humble:ngc}"
-ISAACSIM_IMAGE="${ISAACSIM_IMAGE:-nvcr.io/nvidia/isaac-sim:6.0.1}"
+BASE_IMAGE="${TB3_BASE_IMAGE:-isaacsim61-humble:ngc}"
+ISAACSIM_IMAGE="${ISAACSIM_IMAGE:-nvcr.io/nvidia/isaac-sim:6.1.0}"
+BASE_CONTEXT=src/turtlebot3_isaacsim/docker/isaacsim-ros2
+
+[ -d "$BASE_CONTEXT" ] || {
+    echo "build_images: $BASE_CONTEXT is missing. Run scripts/workspace.sh first." >&2
+    exit 1
+}
 
 echo "==> base: ${BASE_IMAGE}  (Isaac Sim from ${ISAACSIM_IMAGE})"
 docker build \
-    -f docker/isaacsim-ros2/Dockerfile.humble \
+    -f "${BASE_CONTEXT}/Dockerfile.humble" \
     --build-arg "ISAACSIM_IMAGE=${ISAACSIM_IMAGE}" \
     -t "${BASE_IMAGE}" \
-    docker/isaacsim-ros2/
+    "${BASE_CONTEXT}/"
 
 if [ "${1-}" = "--base-only" ]; then
-    echo "==> base built. Verify with: docker/isaacsim-ros2/verify.sh ${BASE_IMAGE}"
+    echo "==> base built. Verify with: ${BASE_CONTEXT}/verify.sh ${BASE_IMAGE}"
     exit 0
 fi
 

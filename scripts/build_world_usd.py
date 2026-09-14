@@ -1,13 +1,14 @@
 """Generate an Isaac Sim .usd for a world from the SAME manifest Gazebo uses.
 
-    scripts/build_world_usd.sh turtlebot3_world      # from the host
+    scripts/build_world.sh turtlebot3_world      # from the host, builds both
 
-Reads /worlds/<name>/world.yaml and writes /worlds/<name>/isaac/<name>.usd. Use
-the wrapper rather than calling this directly: it creates the output directory
-on the host, so it stays yours rather than root's. The Gazebo counterpart is
-scripts/build_world.py, which reads the same manifest and the same meshes; that
-shared source is the only reason the two backends stay in agreement. See
-worlds/README.md.
+Reads <world>/world.yaml and writes <world>/isaac/<name>.usd. Use the wrapper
+rather than calling this directly: it creates the output directory on the host
+so it stays yours rather than root's, and it runs the Gazebo generator in the
+same breath, so the two artifacts cannot be regenerated one without the other.
+The Gazebo counterpart is scripts/build_world.py, which reads the same manifest
+and the same meshes; that shared source is the only reason the two backends stay
+in agreement. See worlds/README.md.
 
 Isaac Sim ships no SDF importer (only URDF, MJCF and heightmap — checked in
 /isaac-sim/exts), which is why this authors USD directly rather than trying to
@@ -34,11 +35,27 @@ Two things this script is careful about, both of which fail silently otherwise:
 
 import argparse
 import asyncio
+import hashlib
 import os
 import sys
 import traceback
 
-import yaml
+# The registry module is shared with the ROS side, deliberately: both have to
+# agree about what `world:=` resolves to. It is pure Python and PyYAML with no
+# ROS import precisely so that it can also be read from here -- Kit runs its own
+# Python 3.12 with the system ROS 2 stripped off the search path, so
+# get_package_share_directory does not exist in this process.
+_REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+for _cand in (os.path.join(_REPO, 'tb3_bringup'), '/repo/tb3_bringup',
+              '/ws/src/tb3_bringup'):
+    if os.path.isdir(os.path.join(_cand, 'tb3_bringup')):
+        sys.path.insert(0, _cand)
+        break
+else:
+    raise SystemExit('build_world_usd: cannot find tb3_bringup. Run this through '
+                     'scripts/build_world.sh')
+
+from tb3_bringup import worlds  # noqa: E402
 
 from isaacsim import SimulationApp
 
@@ -51,27 +68,13 @@ import omni.usd  # noqa: E402
 from isaacsim.core.utils.stage import add_reference_to_stage, create_new_stage  # noqa: E402
 from pxr import Gf, Usd, UsdGeom, UsdPhysics  # noqa: E402
 
-WORLDS_ROOT = os.environ.get('TB3_WORLDS_DIR', '/worlds')
 ROOT_PRIM = '/World'
 
-
-def load_manifest(name):
-    path = os.path.join(WORLDS_ROOT, name, 'world.yaml')
-    if not os.path.isfile(path):
-        avail = [n for n in sorted(os.listdir(WORLDS_ROOT))
-                 if os.path.isfile(os.path.join(WORLDS_ROOT, n, 'world.yaml'))] \
-            if os.path.isdir(WORLDS_ROOT) else []
-        raise SystemExit(
-            f'build_world_usd: no manifest at {path}\n'
-            f'  registry: {WORLDS_ROOT} (available: {", ".join(avail) or "(none)"})\n'
-            f'  If that is empty, the worlds volume is not mounted.')
-    with open(path) as f:
-        m = yaml.safe_load(f)
-    if m.get('name') != name:
-        raise SystemExit(
-            f'build_world_usd: {path} declares name={m.get("name")!r} but lives '
-            f'in worlds/{name}/. They must match.')
-    return m
+#: Layer metadata the generated stage carries, so a USD found on disk can be
+#: traced back to the manifest revision it came from even though it is a binary
+#: build product that is never committed. scripts/check_worlds.py reads the same
+#: digest out of the .world header.
+STAMP_KEY = 'tb3_source_sha256'
 
 
 async def _convert(src, dst):
@@ -116,7 +119,7 @@ def out_dir(world_dir):
             f'build_world_usd: {d} does not exist.\n'
             f'  Run the wrapper instead, which creates it on the host first so '
             f'it does not end up owned by root:\n'
-            f'    scripts/build_world_usd.sh {os.path.basename(world_dir)}')
+            f'    scripts/build_world.sh {os.path.basename(world_dir)}')
     return d
 
 
@@ -190,13 +193,23 @@ def add_collider(prim, exact):
         mesh_api.CreateApproximationAttr().Set('none')
 
 
-def build(name):
-    world_dir = os.path.join(WORLDS_ROOT, name)
-    manifest = load_manifest(name)
+def build(name_or_path):
+    try:
+        world = worlds.World.load(name_or_path)
+    except RuntimeError as e:
+        raise SystemExit('build_world_usd: ' + str(e))
+
+    spec = world.artifact('isaacsim')
+    if spec['mode'] != 'generated':
+        print('{}: artifacts.isaacsim.mode={}, nothing to generate'.format(
+            world.name, spec['mode']))
+        return None
+
+    name, world_dir, manifest = world.name, world.dir, world.manifest
 
     print(f'building {name} from {world_dir}/world.yaml')
     converted = {}
-    for body in manifest['bodies']:
+    for body in world.bodies:
         g = body['geometry']
         if g['type'] == 'mesh' and g['uri'] not in converted:
             converted[g['uri']] = convert_mesh(world_dir, g['uri'])
@@ -208,7 +221,7 @@ def build(name):
     UsdGeom.Xform.Define(stage, ROOT_PRIM)
     stage.SetDefaultPrim(stage.GetPrimAtPath(ROOT_PRIM))
 
-    for body in manifest['bodies']:
+    for body in world.bodies:
         g = body['geometry']
         path = f'{ROOT_PRIM}/{body["name"]}'
         xyz, rpy = body.get('xyz', [0, 0, 0]), body.get('rpy', [0, 0, 0])
@@ -258,7 +271,12 @@ def build(name):
             # approximation — cheaper and exact.
             add_collider(stage.GetPrimAtPath(path), exact=False)
 
-    out = os.path.join(out_dir(world_dir), f'{name}.usd')
+    with open(os.path.join(world_dir, worlds.MANIFEST), 'rb') as f:
+        stage.SetMetadata('customLayerData',
+                          {STAMP_KEY: hashlib.sha256(f.read()).hexdigest()})
+
+    out = os.path.join(world_dir, spec['path'])
+    os.makedirs(os.path.dirname(out), exist_ok=True)
     stage.Export(out)
     print(f'wrote {out}')
     verify(stage, manifest, name)
@@ -296,8 +314,9 @@ def verify(stage, manifest, name):
           f'{n_rigid} rigid bodies')
 
     problems = []
-    if n_col < len(manifest['bodies']):
-        problems.append(f'{n_col} collision prims for {len(manifest["bodies"])} '
+    bodies = manifest.get('bodies') or []
+    if n_col < len(bodies):
+        problems.append(f'{n_col} collision prims for {len(bodies)} '
                         f'manifest bodies — some body has no collider, so the '
                         f'robot will pass through geometry the lidar still sees')
     if n_rigid:
@@ -349,9 +368,9 @@ def verify(stage, manifest, name):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--world', default=os.environ.get('WORLD', 'turtlebot3_world'),
-                    help='world name (directory under the registry); '
-                         'defaults to $WORLD')
+    ap.add_argument('--world', default='turtlebot3_world',
+                    help='world name from the registry, or a path to a world '
+                         'directory')
     args = ap.parse_args()
 
     # SimulationApp.close() hard-exits the process, which swallows both an

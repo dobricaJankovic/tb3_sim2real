@@ -1,12 +1,17 @@
 # One image, one container, one DDS domain: Ubuntu 22.04, ROS 2 Humble and
-# Isaac Sim 6.0 at /isaac-sim. Nav2, RViz, Gazebo Classic, the real-robot
+# Isaac Sim 6.1 at /isaac-sim. Nav2, RViz, Gazebo Classic, the real-robot
 # drivers, our bringup package and the simulator all in one place. Why one
 # container and not two: docs/architecture.md.
 #
+#   scripts/workspace.sh              # source deps into src/ -- do this FIRST
 #   ./docker/x11-auth.sh              # once per X session
 #   scripts/build_images.sh           # base image, then this one
 #   docker compose up -d              # start it; it stays up, caches stay warm
 #   docker compose exec tb3_ros bash  # a terminal; repeat for more
+#
+# scripts/workspace.sh first because the src/ mounts below are bind mounts:
+# Docker creates a missing host path as an empty root-owned directory rather
+# than failing, and colcon then finds no packages for a reason nothing reports.
 #
 # `exec` does NOT run /entrypoint.sh -- only `run` does -- and Ubuntu's stock
 # root .bashrc returns early for non-interactive shells, so
@@ -17,17 +22,19 @@
 #
 # Inside, `isaacsim` starts the GUI and `isaacsim-python <script>` runs a
 # standalone app. Both go through ros-isolate, the ONLY correct way to start Kit
-# from a shell that has sourced ROS 2 -- see docker/isaacsim-ros2/ros-isolate.
+# from a shell that has sourced ROS 2 -- see the base image's ros-isolate, at
+# src/turtlebot3_isaacsim/docker/isaacsim-ros2/.
 
 services:
 
   tb3_ros:
     build:
-      context: ./docker/ros
+      context: ./docker
       dockerfile: Dockerfile
       args:
-        # Built by scripts/build_images.sh from docker/isaacsim-ros2/Dockerfile.humble.
-        BASE_IMAGE: ${TB3_BASE_IMAGE:-isaacsim6-humble:ngc}
+        # Built by scripts/build_images.sh from the imported package's
+        # docker/isaacsim-ros2/Dockerfile.humble -- see that script.
+        BASE_IMAGE: ${TB3_BASE_IMAGE:-isaacsim61-humble:ngc}
     image: tb3_sim2real/tb3_ros:humble
     container_name: tb3_ros
     network_mode: host
@@ -43,8 +50,6 @@ services:
     # `Failed to create shared memory named carb-RStringInternals-62`.
 
     environment:
-      # Which environment tb3_sim.py loads, by registry name (worlds/<name>/).
-      - WORLD=${WORLD:-turtlebot3_world}
       - ACCEPT_EULA=Y
       - PRIVACY_CONSENT=Y
       - PRIVACY_USERID=${PRIVACY_EMAIL:-user@example.com}
@@ -72,6 +77,10 @@ services:
       # URI skips it; models already resolve locally.
       - GAZEBO_MODEL_DATABASE_URI=
 
+      # The world registry, for both the launch files and the generators. Point
+      # TB3_WORLDS at a directory of your own worlds and this follows it.
+      - TB3_WORLDS_DIR=/worlds
+
       - DISPLAY=${DISPLAY}
       - QT_X11_NO_MITSHM=1
       # Host X access control is per-UID (`SI:localuser:<you>`), so the socket
@@ -88,13 +97,27 @@ services:
       - /run/udev:/run/udev
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - ${TB3_XAUTH:-/tmp/tb3_sim2real.docker.xauth}:/root/.Xauthority:ro
-      - ./tb3_bringup:/ws/src/tb3_bringup   # edit on host, colcon build inside
-      - ../turtlebot3_ws/src/turtlebot3_isaacsim:/ws/src/turtlebot3_isaacsim
-      - ../IsaacSim-ros_workspaces/humble_ws/src/isaacsim_bringup:/ws/src/isaacsim_bringup
-      - ./isaac/scenes:/scenes              # rw: the URDF importer writes here
-      - ./isaac/scripts:/scripts:ro
-      # rw: build_world_usd.py writes <name>.usd back beside the manifest.
-      - ./worlds:/worlds
+
+      # --- the workspace ------------------------------------------------------
+      # Edited on the host, colcon-built inside. The two under src/ are source
+      # dependencies fetched by scripts/workspace.sh, not part of this
+      # repository; mounting them individually rather than mounting src/ keeps
+      # NVIDIA's other eight example packages out of the build even if their
+      # COLCON_IGNOREs are ever lost.
+      - ./tb3_bringup:/ws/src/tb3_bringup
+      - ./src/turtlebot3_isaacsim:/ws/src/turtlebot3_isaacsim
+      - ./src/IsaacSim-ros_workspaces/humble_ws/src/isaacsim_bringup:/ws/src/isaacsim_bringup
+
+      # --- the checkout -------------------------------------------------------
+      # The generators live here and import tb3_bringup/worlds.py out of the
+      # same tree the ROS side reads, so the two cannot disagree about what a
+      # world is. Read-write because scripts/build_world.sh is run through here.
+      - .:/repo
+
+      # The world registry. rw: build_world_usd.py writes <name>.usd back beside
+      # the manifest. Override TB3_WORLDS to run against your own registry --
+      # a directory of world directories anywhere on the host.
+      - ${TB3_WORLDS:-./worlds}:/worlds
 
       # --- Kit caches ---------------------------------------------------------
       # /scan appears 164-168 s after launch cold and 14 s warm; that 12x is the
