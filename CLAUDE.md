@@ -33,8 +33,15 @@ worlds/<name>/        world registry. world.yaml is the source of truth; the
 scripts/              workspace.sh (vcs import), build_images.sh,
                       build_world.py / build_world_usd.py / build_world.sh (the
                       generators), clone_world.py (a real room's Nav2 map -> a
-                      world), dae_to_obj.py (Isaac Sim reads no Collada),
-                      check_worlds.py (the drift check)
+                      world), make_map.py (the inverse, for a world that was
+                      DESIGNED -- read its docstring before using it),
+                      dae_to_obj.py (Isaac Sim reads no Collada),
+                      check_worlds.py (the drift check), snapshot.py /
+                      snapshot_gazebo.py (render either backend headless)
+measurements/         recorded backend comparisons. `ros2 run tb3_bringup
+                      drive_test` is the instrument -- ONE instrument for all
+                      three backends, because a per-backend script would be a
+                      per-backend result.
 docker/               one thin layer over the base image; the base itself is
                       NOT here, see below
 src/                  imported source dependencies (gitignored)
@@ -52,6 +59,16 @@ version stale before it was removed on 2026-09-14.
 
 `backend:=isaacsim` **starts** the simulator; `world:=` selects the environment
 on every backend.
+
+**Colour is manifest data, not a Gazebo script name.** A body's `material:` is
+resolved through `worlds.PALETTE` and written by each generator in its own
+dialect. `Gazebo/White` alone is an Ogre token that only Gazebo can read, and
+while that was all the manifest carried, every Isaac Sim stage rendered grey.
+
+**Isaac Sim currently under-rotates**, by 30% at `wz = 0.5` and 52% at
+`wz = 0.2`. It is a wheel-drive gain in `turtlebot3_isaacsim`, diagnosed in
+`measurements/isaac_angular_deficit.md`. Do not treat an Isaac angular result as
+ground truth until that is fixed.
 
 ## Where to look
 
