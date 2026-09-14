@@ -1,63 +1,194 @@
-# World registry
+# The world registry
 
-One environment definition, both simulators.
+One environment definition, three backends.
 
 Each directory here is a world. `world.yaml` is the **source of truth**; the
-Gazebo `.world` and the Isaac Sim `.usd` are both *generated* from it, and the
-geometry under `meshes/` is shared byte-for-byte between them. Neither wrapper
-is ever hand-authored, so the two backends cannot quietly drift apart.
+Gazebo `.world` and the Isaac Sim `.usd` are *generated* from it, the geometry
+under `meshes/` is shared byte-for-byte between them, and the Nav2 map under
+`map/` is the same file for all three backends. Neither simulator's wrapper is
+ever hand-authored, so the two cannot quietly drift apart.
 
 ```
 worlds/<name>/
-  world.yaml       source of truth      committed
-  meshes/          shared geometry      committed
-  <name>.world     generated (SDF)      committed  <- Gazebo
-  model.config     generated            committed  <- makes model:// resolve
-  isaac/           generated, gitignored  <- Isaac Sim
-    <name>.usd     the stage tb3_sim.py references
+  world.yaml       source of truth        committed
+  meshes/          shared geometry        committed
+  map/             Nav2 map               committed  <- all three backends
+  <name>.world     generated (SDF)        committed  <- Gazebo
+  model.config     generated              committed  <- makes model:// resolve
+  isaac/           generated, gitignored              <- Isaac Sim
+    <name>.usd     the stage Kit opens
     _converted/    mesh->USD cache
 ```
 
 The `.world` is committed because it is reviewable text and it means the Gazebo
-backend needs no build step. The `.usd` is not, because it is a build product
-that can only be produced inside the isaacsim container.
+backend needs no build step. The `.usd` is not, because it is a binary build
+product that can only be produced inside the container.
 
-Isaac's output is confined to `isaac/` because that container runs as uid 1234
-while your checkout is yours, so its output directory has to be world-writable.
-Keeping that to one subdirectory leaves `world.yaml` and `meshes/` at normal
-permissions. `scripts/build_world_usd.sh` creates it: git records no directory
-modes, so this cannot be fixed by committing anything.
+Isaac's output is confined to `isaac/` because the container runs as root while
+your checkout is yours. Keeping its writes to one subdirectory leaves
+`world.yaml`, `meshes/` and `map/` at normal permissions.
+`scripts/build_world.sh` creates it on the host first, for the same reason.
 
 ## Using one
 
 ```bash
-# Gazebo — selected by the ROS-side launch
-ros2 launch tb3_bringup bringup.launch.py backend:=gazebo world:=turtlebot3_world
-
-# Isaac Sim — selected where the simulator starts, not by bringup, which only
-# attaches to a running simulator over DDS
-docker compose exec tb3_ros isaacsim-python /scripts/tb3_sim.py --world turtlebot3_world
-ros2 launch tb3_bringup bringup.launch.py backend:=isaacsim   # another terminal
+ros2 launch tb3_bringup bringup.launch.py backend:=gazebo   world:=turtlebot3_world
+ros2 launch tb3_bringup bringup.launch.py backend:=isaacsim world:=turtlebot3_world
+ros2 launch tb3_bringup bringup.launch.py backend:=real     world:=turtlebot3_world
 ```
 
-`world:=` with `backend:=isaacsim` is refused rather than ignored — accepting it
-would imply the ROS side can change what the simulator loaded, and it cannot.
+`world:=` names the **environment**, not a file, and means the same thing on
+every backend. gzserver loads its `.world`, Kit opens its `.usd`, and the real
+robot loads nothing — the environment is already around it — but all three take
+the spawn pose and the Nav2 map from the same manifest, which is what makes a
+run on one comparable with a run on another.
 
-## Adding one
+It also takes a **path**, so an environment of your own needs no entry here:
 
-1. `mkdir worlds/my_office && cd worlds/my_office`
-2. Drop the geometry in `meshes/` (`.dae`, `.obj`, `.stl` — whatever both
-   assimp and Gazebo read; an office scan exported as OBJ is the expected case).
+```bash
+ros2 launch tb3_bringup bringup.launch.py backend:=gazebo world:=~/worlds/my_office
+```
+
+A whole registry of your own works too — point `TB3_WORLDS` at it before
+`docker compose up` and `world:=` resolves names against yours instead.
+
+---
+
+# Cloning a real environment
+
+The hard part of sim-to-real is not the launch files. It is getting the room the
+robot is actually in into two simulators, and keeping it there.
+
+```
+                       the real room
+                             |
+                 drive it, record a Nav2 map
+                             |
+                      world.yaml + meshes/          <- the ONLY thing you edit
+                       /               \
+             build_world.py       build_world_usd.py
+                     /                   \
+            <name>.world            isaac/<name>.usd
+                (Gazebo)                (Isaac Sim)
+```
+
+## Why the map
+
+A normal TurtleBot3 user already has exactly one artefact that describes their
+real environment metrically: the occupancy map they had to record for Nav2. It
+is in the frame Nav2 works in, it is at the resolution the planner uses, and it
+is a record of precisely the geometry the robot's own lidar can see. It costs
+nothing extra, because you need it anyway.
+
+```bash
+# in the real room
+ros2 launch turtlebot3_cartographer cartographer.launch.py
+ros2 run nav2_map_server map_saver_cli -f ~/maps/lab_room
+
+# then, once
+scripts/clone_world.py --map ~/maps/lab_room.yaml --name lab_room --spawn 0 0
+scripts/build_world.sh lab_room
+```
+
+That writes `worlds/lab_room/` — the occupied cells extruded into one OBJ, a
+manifest whose single body is that mesh, and the map copied in beside it — and
+then generates both simulators' representations from that manifest. The room is
+now runnable on all three backends, from one `world:=lab_room`.
+
+**What this captures is a floor plan, not a model of the room.** A horizontal
+lidar sees one plane. A table top, an overhang, a step down, a glass wall: none
+of them are in the map, so none of them are in the clone. Measure those and add
+them as extra bodies in `world.yaml` — the manifest shape is the same whether a
+body came from the map or from a tape measure, and both simulators get it.
+
+## Why not a 3D scan
+
+Photogrammetry or a phone's LiDAR gives a two-million-triangle non-manifold
+shell. Neither ODE nor PhysX will collide with that usefully, so it has to be
+decimated and its normals fixed in Blender first — which is an afternoon, a
+skill, and a second authoring step that then has nothing to keep it in agreement
+with anything. If you have a scan and want it, add it as an extra *visual* body
+and let the extruded geometry carry collision.
+
+## Why one mesh and not boxes
+
+Rectangle-decomposing an occupancy grid into `box` bodies is the obvious
+alternative and it is worse: a real room comes out as several hundred boxes, and
+two simulators each approximating several hundred boxes is more surface to
+disagree on, not less. One mesh is loaded by both of them from the same file.
+
+## Why OBJ
+
+Gazebo Classic's mesh loader reads `dae`, `obj` and `stl`; Isaac Sim's asset
+converter reads `obj`, `fbx` and `gltf`. **OBJ is the intersection**, and unlike
+Collada it carries neither a unit scale nor an up-axis header for the two of
+them to interpret differently. Prefer it for anything you author yourself. See
+"Two things that bite" below for what Collada costs.
+
+## Why not USD or SDF as the single format
+
+Both were considered and neither works today. Gazebo Classic has no USD code
+path at all, and the one converter that exists — [`gz-usd`][gz-usd] — targets
+gz-sim rather than Classic, has no releases, requires building OpenUSD 24.08
+from source, and has not had a commit since October 2024. In the other
+direction, Isaac Sim 6.x ships importers for URDF, MJCF, Onshape and CAD, and
+none for SDF. URDF is not a substitute either: it has no concept of a world —
+no lights, no ground plane, no `<static>` — and Isaac's URDF importer builds an
+articulation with rigid bodies, which is the opposite of a static room.
+
+So the canonical form is a small manifest that both can be *generated* from,
+and the generators are two files of a few hundred lines each.
+
+[gz-usd]: https://github.com/gazebosim/gz-usd
+
+## Keeping them from drifting
+
+```bash
+scripts/check_worlds.py          # every world; exit status is the answer
+```
+
+Three ways a world can quietly stop being one world, and what catches each:
+
+| what goes wrong | what catches it |
+|---|---|
+| manifest edited, artifacts not regenerated | the sha256 of `world.yaml` is stamped into the `.world` header and the USD's `customLayerData` |
+| a generated file edited by hand | the `.world` is parsed back and compared body by body against the manifest |
+| the model no longer matches the real room | the manifest is cut at the burger's 0.182 m beam height and compared against the world's own map |
+
+The third is the one worth understanding. It answers a different question from
+the first two: not "were these built from the same file" but "does this file
+still describe the room the robot drove around". It reports how much of the map
+is modelled and how much of the model is not in the map, with one cell of slack.
+A correct clone scores 100% / 0%; a map mirrored about its x axis — a real bug,
+and one that plans and drives without looking broken — scores 22% / 80%.
+
+It runs on stdlib and PyYAML in under a second, so put it in a pre-commit hook.
+It deliberately does **not** parse the USD, which would need Kit or `usd-core`;
+the Isaac stage is checked where it is written instead, by `build_world_usd.py`,
+which asserts the assembled stage's bounds against the manifest's `verify` block
+and refuses to write one whose colliders are wrong.
+
+## Adding one by hand
+
+For a measured room, or anything simpler than a scan:
+
+1. `mkdir worlds/my_office`
+2. Put any geometry in `meshes/` (`.obj` for preference — see above).
 3. Write `world.yaml`:
 
    ```yaml
    name: my_office            # must equal the directory name
    description: >-
-     Ground floor, scanned 2026-09.
+     Ground floor, measured 2026-09.
    spawn:
      xyz: [0.0, 0.0, 0.01]
      yaw: 0.0
+   map: map/my_office.yaml    # optional; needed for nav:=true
    bodies:
+     - name: wall_n
+       geometry: {type: box, size: [5.0, 0.1, 1.0]}
+       xyz: [0, 2.0, 0.5]
+       rpy: [0, 0, 0]
      - name: shell
        geometry: {type: mesh, uri: meshes/office.obj, scale: [1, 1, 1]}
        xyz: [0, 0, 0]
@@ -65,16 +196,41 @@ would imply the ROS side can change what the simulator loaded, and it cannot.
    ```
 
    Besides `mesh`, the generators understand `cylinder` (`radius`, `length`),
-   `box` (`size`) and `sphere` (`radius`).
+   `box` (`size`) and `sphere` (`radius`). Poses are SDF's: `xyz` in metres,
+   `rpy` in radians, extrinsic XYZ.
 
-4. Generate both wrappers:
+4. `scripts/build_world.sh my_office`
+5. `world:=my_office`. No launch file changes.
 
-   ```bash
-   scripts/build_world.py my_office                      # -> my_office.world
-   scripts/build_world_usd.sh my_office                  # -> isaac/my_office.usd
-   ```
+## Worlds that are already authored
 
-5. `world:=my_office` / `WORLD=my_office`. No launch file changes.
+Some environments should not be generated. `turtlebot3_world`'s geometry is
+upstream's; Isaac Sim's `Simple_Warehouse` is NVIDIA's and is fetched from their
+asset root rather than living on disk at all. Those declare where their
+artifacts are instead of having them written:
+
+```yaml
+artifacts:
+  gazebo:   {mode: adopted, path: warehouse.world}
+  isaacsim: {mode: adopted, path: /Isaac/Environments/Simple_Warehouse/warehouse.usd,
+             world_z: 0.0}
+```
+
+- `generated` (the default) — the generator writes the file from `bodies`.
+- `adopted` — the file is authored elsewhere; the generator leaves it alone and
+  `world:=` simply points at it. An Isaac path may be a local file, an Isaac
+  asset-root path (`/Isaac/...`) or a URL.
+- `none` — this backend needs no file. `empty_stage` uses it for Isaac Sim,
+  which authors its own ground plane and light.
+
+There is one mechanism, not two: `world:=`, the spawn pose and the map work
+identically either way, and `check_worlds.py` still runs — it just checks the
+footprint against the map rather than a provenance digest, since there is no
+generator to claim provenance.
+
+`artifacts` is the escape hatch, not the habit. A world with `mode: adopted` on
+both backends is two hand-authored files that nothing can prove agree; use it
+when the artifacts genuinely come from somewhere else, and generate otherwise.
 
 ## Two things that bite
 
@@ -82,12 +238,14 @@ would imply the ROS side can change what the simulator loaded, and it cannot.
 collision is legal. A convex hull is not a safe default: the `turtlebot3_world`
 wall is a thin hexagonal shell whose hull is a *solid* prism, which seals the
 robot inside the arena at spawn. `build_world_usd.py` sets the approximation
-explicitly for this reason.
+explicitly, and verifies it afterwards, for this reason.
 
-**Collada unit and up-axis are not reliable.** Both meshes here declare
-`<unit name="inch" meter="0.0254"/>` and `up_axis Y_UP`, but their vertices are
-laid out Z-up (the hexagon lies in XY, extruded along Z). Gazebo renders them
-upright, so a converter that *honours* `Y_UP` would tip the Isaac arena on its
-side while Gazebo stayed correct — a divergence between backends that no error
-message would report. `build_world_usd.py` verifies converted bounds against the
-manifest's expectation instead of trusting the converter.
+**Collada unit and up-axis are not reliable.** `turtlebot3_world`'s two meshes
+declare `<unit name="inch" meter="0.0254"/>` and `up_axis Y_UP`, but their
+vertices are laid out Z-up (the hexagon lies in XY, extruded along Z). Gazebo
+renders them upright, so a converter that *honours* `Y_UP` would tip the Isaac
+arena on its side while Gazebo stayed correct — a divergence between backends
+that no error message would report, and a scale error of 39.4x is the other half
+of the same trap. `build_world_usd.py` verifies converted bounds against the
+manifest's `verify` block rather than trusting the converter. This is why new
+worlds should use OBJ, which has no such headers to disagree about.
