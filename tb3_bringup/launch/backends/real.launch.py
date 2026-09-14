@@ -5,6 +5,12 @@ Does NOT supply /clock — wall time, so use_sim_time is false for this backend.
 
 Mirrors turtlebot3_bringup/launch/robot.launch.py, minus the state publisher
 (that lives in common/ and is shared).
+
+`namespace` is passed to turtlebot3_node as a PARAMETER, not just as a frame
+prefix, because the node declares it statically with no default: without it the
+process aborts before it opens the serial port, with
+`Statically typed parameter 'namespace' must be initialized`. Upstream passes
+it the same way and it is easy to leave out when lifting only the node.
 """
 
 import os
@@ -36,6 +42,7 @@ def setup(context, *args, **kwargs):
         'param', 'humble', f'{model}.yaml',
     )
     usb_port = LaunchConfiguration('usb_port')
+    namespace = LaunchConfiguration('namespace')
 
     return [
         IncludeLaunchDescription(
@@ -46,7 +53,7 @@ def setup(context, *args, **kwargs):
         Node(
             package='turtlebot3_node',
             executable='turtlebot3_ros',
-            parameters=[tb3_param],
+            parameters=[tb3_param, {'namespace': namespace}],
             arguments=['-i', usb_port],
             output='screen',
         ),
@@ -58,5 +65,8 @@ def generate_launch_description():
         DeclareLaunchArgument('use_sim_time', default_value='false'),
         DeclareLaunchArgument('usb_port', default_value='/dev/ttyACM0',
                               description='OpenCR serial port'),
+        DeclareLaunchArgument('namespace', default_value='',
+                              description='Topic and frame prefix, for '
+                                          'multi-robot. Empty for one robot.'),
         OpaqueFunction(function=setup),
     ])

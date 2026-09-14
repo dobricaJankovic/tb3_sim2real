@@ -130,8 +130,15 @@ def setup(context, *args, **kwargs):
                   name='wait_for_sim', output='screen')
     return actions + [
         waiter,
+        # handle_once, or Nav2 is brought up twice: the handler stays registered
+        # otherwise and a second matching exit runs bringup_launch.py again,
+        # loading every composable node into a second nav2_container. The
+        # symptom is a wall of `Transition is not registered` and
+        # `Node '/local_costmap/local_costmap' has already been added to an
+        # executor`, and both containers then abort.
         RegisterEventHandler(OnProcessExit(target_action=waiter,
-                                           on_exit=[nav2])),
+                                           on_exit=[nav2],
+                                           handle_once=True)),
     ]
 
 

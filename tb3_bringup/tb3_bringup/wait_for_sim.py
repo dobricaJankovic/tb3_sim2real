@@ -45,8 +45,9 @@ class WaitForSim(Node):
             self._warned = True
             self.get_logger().warn(
                 'still no /clock. Isaac Sim on a cold shader cache takes two '
-                'to three minutes to reach play(); if it is longer than that, '
-                'check ROS_DOMAIN_ID and whether the simulator is still alive.')
+                'to three minutes to reach play(), and gzserver a few seconds; '
+                'past that, check that the simulator is still alive and that it '
+                'shares ROS_DOMAIN_ID with this shell.')
 
 
 def main(args=None):

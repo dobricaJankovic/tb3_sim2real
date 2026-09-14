@@ -34,3 +34,6 @@ worlds/*/isaac/
 # local env overrides
 .env
 docker-compose.override.yml
+
+# editor
+.vscode/
