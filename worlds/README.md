@@ -263,8 +263,11 @@ The third is the one worth understanding. It answers a different question from
 the first two: not "were these built from the same file" but "does this file
 still describe the room the robot drove around". It reports how much of the map
 is modelled and how much of the model is not in the map, with one cell of slack.
-A correct clone scores 100% / 0%; a map mirrored about its x axis — a real bug,
-and one that plans and drives without looking broken — scores 22% / 80%.
+A correct clone scores 100% / 0%. A map mirrored about its x axis — a real bug,
+and one that plans and drives without looking broken — scores 27% / 27%, and
+mirrored about y, 31% / 24%. Both fail on coverage well before the contradiction
+figure matters, which is the point: an arena as symmetric as this one cannot be
+caught by contradictions alone.
 
 It runs on stdlib and PyYAML in under a second, so put it in a pre-commit hook.
 It deliberately does **not** parse the USD, which would need Kit or `usd-core`;
