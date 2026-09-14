@@ -27,14 +27,15 @@ worlds/<name>/        world registry. world.yaml is the source of truth; the
                       Gazebo .world and the Isaac .usd are generated from it and
                       share meshes byte-for-byte. Adding a world is a new
                       directory, not a code change.
-turtlebot3_isaacsim/  standalone ROS 2 package, a peer of upstream
-                      turtlebot3_gazebo — launch files + OmniGraph scripts that
-                      present the real robot's topic interface from Isaac Sim.
-                      Usable without the rest of this repo.
-isaac/scripts/        tb3_sim.py, the in-repo simulator launcher used by
-                      `backend:=isaacsim` (boots Kit, opens the stage, builds the
-                      graph, play()). Older and more hand-rolled than
-                      turtlebot3_isaacsim/; the two overlap on purpose for now.
+turtlebot3_isaacsim/  STALE DUPLICATE. Split out on 2026-09-13 to its own repo
+                      at ~/turtlebot3_ws/src/turtlebot3_isaacsim, where it is
+                      developed as a peer of turtlebot3_gazebo and imported from
+                      here. Edit it there, not here; this copy is to be deleted
+                      once the new repo is confirmed.
+isaac/scripts/        tb3_sim.py, the simulator launcher `backend:=isaacsim`
+                      attaches to — boots Kit, opens the stage, builds the ROS 2
+                      OmniGraph, play(). Hand-rolled and older than the split-out
+                      package; this is the one this repo actually runs.
 isaac/scenes/         USD stages (gitignored)
 docker/               isaacsim-ros2/ is the generic base (verify.sh scores it);
                       ros/ adds TurtleBot3 + drivers + workspace -> tb3_ros

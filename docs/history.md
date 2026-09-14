@@ -936,3 +936,43 @@ pulled in opposite directions here, and the resolution was not a compromise
 between them: the reasoning was worth every word, it was just in the wrong file.
 A package that has to be a drop-in peer of another should *read* like that peer,
 because whoever reaches for it will have the peer open beside it.
+
+## 2026-09-14 — CLAUDE.md orients, and the skill list gets trimmed
+
+**A fresh session had no cheap way to learn what this repo is.** `CLAUDE.md`
+opened directly into the working agreements — good rules, no subject. The only
+way to find the subject was to read `README.md`, then `docs/architecture.md`,
+then enough of the tree to tell `isaac/scripts/` from `turtlebot3_isaacsim/`.
+That is a survey, and it happened at the start of every conversation.
+
+`CLAUDE.md` now leads with three short sections: what the repo is (three
+backends, one interface, one container), the layout as an annotated tree, and a
+one-line index saying which doc answers which question. The agreements follow
+unchanged. The index is the part that does the work — it tells a new session to
+read *one* doc, and which one, instead of the set.
+
+**Writing the layout caught a live trap.** The first draft described
+`turtlebot3_isaacsim/` as a standalone package usable on its own, which is what
+its README says and what it was for one day. `docs/history.md` records the
+2026-09-13 split: the real package now lives at
+`~/turtlebot3_ws/src/turtlebot3_isaacsim` and the in-repo copy is a stale
+duplicate awaiting deletion. Exactly the fact a new session would have missed,
+and it would have missed it by editing the wrong copy. The entry now says so in
+its first two words.
+
+**Skills.** `.claude/settings.json` gained `skillOverrides`. The bundled skills
+with no bearing on a ROS 2 / Isaac Sim repo are `off` (design, dataviz, the
+three artifact skills, claude-api, claude-in-chrome); the harness-config ones
+are `user-invocable-only`, hidden from the model but still typable as slash
+commands (schedule, loop, update-config, keybindings-help,
+fewer-permission-prompts, init). `code-review`, `simplify`, `security-review`
+and `run` stay fully on.
+
+Connectors needed no change: there are no MCP servers configured at any scope.
+The two that show up — Google Drive, Anthropic Economic Index — are account-level
+claude.ai connectors, toggled in `/mcp` or on claude.ai, not from any file in
+this repo.
+
+**Lesson worth keeping.** Context discipline is not only about what a session
+reads; it is about whether the first file it reads is *enough*. A CLAUDE.md that
+carries rules but not the subject guarantees a survey before any work starts.
