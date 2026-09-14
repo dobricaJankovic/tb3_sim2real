@@ -23,6 +23,14 @@ description: >-
   A single 6.0 x 5.0 m room with a partition forming an alcove, furnished with a
   dining table and two chairs, a coffee table, a shelf, a cabinet and a bin.
 
+# The Nav2 map. This world was designed rather than cloned from a real room, so
+# there is nothing to record and the map is generated FROM this manifest by
+# scripts/make_map.py — the inverse of the usual direction. That also means
+# check_worlds.py's footprint test is not an independent check here: it is
+# comparing the model with a picture of the model. It still validates the PGM
+# encoding, origin and row order, which is where map bugs actually live.
+map: map/small_office.yaml
+
 # Open floor, clear of every prop, facing the length of the room.
 spawn:
   xyz: [-1.5, -1.5, 0.01]
