@@ -29,10 +29,30 @@ backends measured from the ROS side in the `tb3_ros` container.
   correctly results in **no** `--world` on the simulator's command line, so Kit
   authors its own ground plane. Verified on the running process's argv.
 - **`scripts/build_world.sh turtlebot3_world`** — regenerated both
-  representations. The USD generator's own checks pass: 15 collision prims for
-  15 manifest bodies, all 6 mesh colliders at approximation `none`, 0 rigid
-  bodies, and bounds within 2 cm of the value computed analytically from the
-  meshes and placements. `verify: OK — Isaac stage matches the Gazebo world`.
+  representations, from OBJ meshes (see below). The USD generator's own checks
+  pass: 15 collision prims for 15 manifest bodies, all 6 mesh colliders at
+  approximation `none`, 0 rigid bodies, and bounds matching the value computed
+  analytically from the meshes and placements to four decimals.
+  `verify: OK — Isaac stage matches the Gazebo world`.
+
+### Parity, measured from the same meshes
+
+One manifest, one pair of OBJ files, the robot at the manifest's spawn:
+
+| | gazebo | isaacsim |
+|---|---|---|
+| rays | 360 | 360 |
+| with a return | 324 | 307 |
+| closest | 0.514 m | 0.521 m |
+| furthest | 3.352 m | 3.366 m |
+
+**7 mm apart on the closest return.** The two backends are measuring the same
+geometry. For comparison, the same measurement against the *Collada* meshes
+before the conversion read 324/360 and 0.511-3.357 m on Gazebo — so the mesh
+conversion moved nothing.
+
+The 324-vs-307 gap is the no-return encoding, not the geometry: Isaac reports
+`-1.0` where Gazebo reports `inf`. See "Known open".
 - **`scripts/check_worlds.py`** — 2/2 worlds consistent. Negative-tested against
   deliberately broken copies: a manifest edited without regenerating, a
   generated `.world` edited by hand with its header intact, and a map mirrored
@@ -85,14 +105,17 @@ project has found, and exactly what that file is for.
 
 ## Known open
 
-- **`/scan` does not match between backends.** Isaac publishes 3600 rays where
-  Gazebo publishes 360, and reports no-return as `-1.0` where Gazebo uses `inf`
-  — and `-1.0` is not a valid `LaserScan` range, so the two backends disagree on
-  the one field Nav2's obstacle layer filters on. The fix is an LDS-shaped RTX
-  scan pattern, and it belongs in `turtlebot3_isaacsim`, which owns the lidar
-  profile. Overriding `scanRateBaseHz`/`patternFiringRateHz` on a stock survey
-  config is *not* a workaround: it advertises the right geometry, publishes
-  erratically, and trips `Multi-tick is enabled but motion BVH is not active`.
+- **`/scan` encodes no-return differently.** Isaac reports `-1.0` where Gazebo
+  reports `inf`, and `-1.0` is not a valid `LaserScan` range — so the two
+  backends disagree on the one field Nav2's obstacle layer filters on. It has
+  not bitten a Nav2 run yet, because the obstacle layer discards out-of-range
+  values either way, but it is a difference Nav2 is entitled to trip over.
+  It belongs in `turtlebot3_isaacsim`, which owns the lidar profile.
+
+  The *geometry* half of this is fixed and this note used to be wrong about it:
+  Isaac published 3600 rays against Gazebo's 360 while this repository carried
+  its own hand-rolled simulator. The imported package ships a real LDS scan
+  pattern (`models/lidar_configs/turtlebot3_lds.json`) and publishes 360.
 - **`backend:=real` is unverified.** No robot has been on the bench. The launch
   file mirrors `turtlebot3_bringup/launch/robot.launch.py` minus the state
   publisher, which is shared.

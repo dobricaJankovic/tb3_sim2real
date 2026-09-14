@@ -153,13 +153,19 @@ def read_pgm(path):
     return cols, rows, maxval, pix[:cols * rows]
 
 
-def occupancy(map_yaml):
-    """Read a Nav2 map into a boolean grid, plus its metadata.
+def classify(map_yaml):
+    """Read a Nav2 map into occupied/free grids, plus its metadata.
 
-    Returns (occupied, cols, rows, resolution, origin). `occupied[r][c]` is
-    indexed with r counting UP from the map origin, which is the map_server
-    convention: the .pgm's first row is the TOP of the image, i.e. the highest
-    y, so the rows are reversed here once and never again.
+    Returns (occupied, free, cols, rows, resolution, origin). Both grids are
+    indexed `[r][c]` with r counting UP from the map origin, which is the
+    map_server convention: the .pgm's first row is the TOP of the image, i.e.
+    the highest y, so the rows are reversed here once and never again.
+
+    Occupied and free are not complements. The third state is UNKNOWN -- where
+    the robot never looked -- and keeping it distinct is what lets a caller
+    tell "the model has a wall the map does not" (a contradiction, in free
+    space) from "the model has a wall the map never saw" (not a contradiction,
+    in unknown space).
     """
     with open(map_yaml) as f:
         meta = yaml.safe_load(f)
@@ -172,18 +178,33 @@ def occupancy(map_yaml):
     negate = int(meta.get('negate', 0))
     occupied_thresh = float(meta.get('occupied_thresh', 0.65))
 
+    free_thresh = float(meta.get('free_thresh', 0.196))
+
     # map_server's rule: p = (maxval - value) / maxval, inverted if negate.
-    # p above occupied_thresh is an obstacle; everything else -- free and
-    # unknown alike -- is not. Unknown is deliberately not a wall: the grey
+    # p above occupied_thresh is an obstacle, p below free_thresh is free, and
+    # what is left is unknown. Unknown is deliberately not a wall: the grey
     # border round a SLAM map is where the robot never looked, and extruding it
     # would box the room in with geometry that is not there.
-    def is_occ(v):
-        p = v / maxval if negate else (maxval - v) / maxval
-        return p > occupied_thresh
+    def p_of(v):
+        return v / maxval if negate else (maxval - v) / maxval
 
-    grid = [[is_occ(pix[(rows - 1 - r) * cols + c]) for c in range(cols)]
-            for r in range(rows)]
-    return grid, cols, rows, resolution, origin
+    occ = [[False] * cols for _ in range(rows)]
+    free = [[False] * cols for _ in range(rows)]
+    for r in range(rows):
+        row = (rows - 1 - r) * cols
+        for c in range(cols):
+            p = p_of(pix[row + c])
+            if p > occupied_thresh:
+                occ[r][c] = True
+            elif p < free_thresh:
+                free[r][c] = True
+    return occ, free, cols, rows, resolution, origin
+
+
+def occupancy(map_yaml):
+    """Just the occupied grid. See classify()."""
+    occ, _free, cols, rows, resolution, origin = classify(map_yaml)
+    return occ, cols, rows, resolution, origin
 
 
 def despeckle(grid, cols, rows, min_neighbours):

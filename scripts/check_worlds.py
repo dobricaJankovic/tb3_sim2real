@@ -55,10 +55,11 @@ LIDAR_Z = 0.182
 SLACK = 1
 
 #: Below these, the manifest and the map are describing different rooms. Not
-#: tight, deliberately -- a real map has furniture that moved, a doorway that
-#: was open once, and a grey rim where the robot never looked.
+#: tight, deliberately -- a real map has furniture that moved and a doorway
+#: that was open once. Geometry in UNKNOWN space is not counted against the
+#: model at all; see map_cells().
 COVERED_MIN = 0.85
-SPURIOUS_MAX = 0.25
+SPURIOUS_MAX = 0.15
 
 
 class Result:
@@ -259,8 +260,11 @@ def rasterise(world):
         g = body['geometry']
         x, y, z = [float(v) for v in body.get('xyz', [0, 0, 0])]
         rpy = [float(v) for v in body.get('rpy', [0, 0, 0])]
-        if g['type'] in ('cylinder', 'sphere') and any(abs(a) > 1e-6 for a in rpy[:2]):
-            return None                       # tilted: not a 2D footprint
+        # Roll or pitch tilts the body out of the plane the map was cut in, and
+        # a 2D footprint stops being a meaningful thing to compare. Yaw is fine
+        # and is applied below -- turtlebot3_world's wall is a yawed mesh.
+        if any(abs(a) > 1e-6 for a in rpy[:2]):
+            return None
         if g['type'] == 'cylinder':
             h = float(g['length'])
             if not (z - h / 2 <= LIDAR_Z <= z + h / 2):
@@ -296,30 +300,44 @@ def rasterise(world):
             uri = g['uri']
             if not uri.lower().endswith('.obj'):
                 return None                   # would need a mesh library
-            if any(abs(a) > 1e-6 for a in rpy):
-                return None                   # rotated mesh: not handled here
             tris = obj_triangles(os.path.join(world.dir, uri),
                                  g.get('scale', [1, 1, 1]))
+            ca, sa = math.cos(rpy[2]), math.sin(rpy[2])
             for (ax, ay), (bx, by) in slice_segments(tris, LIDAR_Z - z):
                 n = max(1, int(math.hypot(bx - ax, by - ay) / (step / 2)))
                 for i in range(n + 1):
-                    stamp(x + ax + (bx - ax) * i / n, y + ay + (by - ay) * i / n)
+                    u = ax + (bx - ax) * i / n
+                    v = ay + (by - ay) * i / n
+                    stamp(x + u * ca - v * sa, y + u * sa + v * ca)
         else:
             return None
     return grid
 
 
 def map_cells(map_yaml, step=0.05):
+    """(occupied, free) cell sets from a Nav2 map, on the comparison grid.
+
+    Unknown is neither, and that distinction is the whole point: a model wall
+    standing in UNKNOWN space is geometry the robot never looked at, which is
+    not a disagreement. turtlebot3_world's five decorative hexagons live
+    outside the arena, so upstream's map -- recorded from inside it -- has
+    never seen them.
+    """
     import clone_world                       # same directory; reuse its reader
-    grid, cols, rows, resolution, origin = clone_world.occupancy(map_yaml)
-    cells = set()
-    for r in range(rows):
-        for c in range(cols):
-            if grid[r][c]:
-                x = origin[0] + (c + 0.5) * resolution
-                y = origin[1] + (r + 0.5) * resolution
-                cells.add((int(math.floor(x / step)), int(math.floor(y / step))))
-    return cells
+    occ, free, cols, rows, resolution, origin = clone_world.classify(map_yaml)
+
+    def cells(grid):
+        out = set()
+        for r in range(rows):
+            for c in range(cols):
+                if grid[r][c]:
+                    x = origin[0] + (c + 0.5) * resolution
+                    y = origin[1] + (r + 0.5) * resolution
+                    out.add((int(math.floor(x / step)),
+                             int(math.floor(y / step))))
+        return out
+
+    return cells(occ), cells(free)
 
 
 def near(a, b, slack=SLACK):
@@ -346,17 +364,24 @@ def check_footprint(world, res):
                  'skipped (the Isaac stage bounds check covers scale and axes)')
         return
 
-    recorded = map_cells(map_yaml)
+    recorded, free = map_cells(map_yaml)
     if not recorded or not model:
         res.note('nothing to compare')
         return
 
     covered = near(recorded, model) / len(recorded)
-    spurious = 1.0 - near(model, recorded) / len(model)
+
+    # Contradicted, not merely absent: model cells standing in space the map
+    # records as FREE, and not next to anything the map records as occupied.
+    unmatched = {c for c in model if not near({c}, recorded)}
+    contradicted = {c for c in unmatched if c in free}
+    spurious = len(contradicted) / len(model)
+    unseen = len(unmatched) - len(contradicted)
+
     msg = (f'footprint vs {os.path.relpath(map_yaml, world.dir)}: '
            f'{covered:.0%} of the map is modelled, {spurious:.0%} of the model '
-           f'is not in the map ({len(model)} model / {len(recorded)} map cells '
-           f'at {LIDAR_Z} m)')
+           f'contradicts it ({len(model)} model / {len(recorded)} map cells at '
+           f'{LIDAR_Z} m; {unseen} model cells in space the map never saw)')
     if covered < COVERED_MIN or spurious > SPURIOUS_MAX:
         res.fail(msg + '\n      The model and the map disagree about where the '
                        'walls are. A mirrored or offset map is the usual cause; '

@@ -119,11 +119,31 @@ disagree on, not less. One mesh is loaded by both of them from the same file.
 
 ## Why OBJ
 
-Gazebo Classic's mesh loader reads `dae`, `obj` and `stl`; Isaac Sim's asset
-converter reads `obj`, `fbx` and `gltf`. **OBJ is the intersection**, and unlike
-Collada it carries neither a unit scale nor an up-axis header for the two of
-them to interpret differently. Prefer it for anything you author yourself. See
-"Two things that bite" below for what Collada costs.
+Not a preference — a requirement on one side and the right answer on the other.
+
+**Isaac Sim does not read Collada.** On 6.1.0 the asset converter answers
+
+    Unsupported import format: .dae. Supported formats: .bvh, .fbx, .glb,
+    .gltf, .lxo, .md5, .obj, .ply, .stl, .usd, .usda, .usdc, .usdz
+
+so a world whose meshes are `.dae` builds for Gazebo and **cannot be built for
+Isaac Sim at all**. Gazebo Classic's loader reads `dae`, `obj` and `stl`, so OBJ
+and STL are the intersection.
+
+Between those two, OBJ — and unlike Collada it carries neither a unit scale nor
+an up-axis header for the two backends to interpret differently, which is
+exactly the trap `turtlebot3_world`'s original meshes embodied. If what you have
+is Collada, convert it once:
+
+```bash
+scripts/dae_to_obj.py worlds/my_world/meshes/room.dae
+```
+
+which bakes the declared `<unit>` into the vertices (OBJ has no unit field) and
+prints the resulting bounds so you can check them against your manifest's
+`verify` block. Then point the manifest at the `.obj` and delete the `.dae`:
+two files holding the same geometry is the thing this registry exists to
+prevent.
 
 ## Why not USD or SDF as the single format
 
@@ -240,12 +260,25 @@ wall is a thin hexagonal shell whose hull is a *solid* prism, which seals the
 robot inside the arena at spawn. `build_world_usd.py` sets the approximation
 explicitly, and verifies it afterwards, for this reason.
 
-**Collada unit and up-axis are not reliable.** `turtlebot3_world`'s two meshes
-declare `<unit name="inch" meter="0.0254"/>` and `up_axis Y_UP`, but their
-vertices are laid out Z-up (the hexagon lies in XY, extruded along Z). Gazebo
-renders them upright, so a converter that *honours* `Y_UP` would tip the Isaac
-arena on its side while Gazebo stayed correct — a divergence between backends
-that no error message would report, and a scale error of 39.4x is the other half
-of the same trap. `build_world_usd.py` verifies converted bounds against the
-manifest's `verify` block rather than trusting the converter. This is why new
-worlds should use OBJ, which has no such headers to disagree about.
+**A mesh can arrive at the wrong scale, and nothing will say so.** This is what
+the manifest's `verify` block is for, and it has now caught two of them:
+
+- *Centimetres.* Isaac Sim's asset converter authors converted layers with
+  `metersPerUnit = 0.01` by default, and USD scales a reference by the ratio of
+  the two layers' units — so a mesh whose vertices are in metres arrives in the
+  (metres) stage exactly **100x too small**. `build_world_usd.py` sets
+  `use_meter_as_world_unit`. A format that declares its own unit escapes this;
+  OBJ and STL, which declare nothing, do not. It went unnoticed for as long as
+  every world here used Collada.
+- *Collada's headers.* `turtlebot3_world`'s original meshes declared
+  `<unit name="inch" meter="0.0254"/>` and `up_axis Y_UP` while laying their
+  vertices out Z-up. Gazebo applies the unit and ignores the axis, so Z-up at
+  0.0254 m is the parity truth; a converter that *honoured* `Y_UP` would tip the
+  Isaac arena on its side while Gazebo stayed correct, and one that ignored
+  `<unit>` would make it 39.4x too large. Both are now baked into the committed
+  `.obj` and cannot recur.
+
+`build_world_usd.py` verifies the assembled stage's bounds against `verify`
+rather than trusting the converter, and it clears the mesh cache whenever the
+converter settings change — the cache is keyed on mtime alone, so a stale entry
+would otherwise survive the very fix that was meant to correct it.

@@ -13,6 +13,13 @@
 # The geometry under meshes/ is shared byte-for-byte between the two backends —
 # that is the whole point of the layout. Only the wrappers differ.
 #
+# The meshes are OBJ, converted once from upstream's Collada by
+# scripts/dae_to_obj.py with the declared inch unit baked into the vertices.
+# Isaac Sim 6.1's asset converter does not read .dae at all, so this is not a
+# preference: a Collada world builds for Gazebo and cannot be built for Isaac
+# Sim. OBJ also carries no unit and no up-axis header for the two backends to
+# disagree about, which is the trap these particular files embody.
+#
 # Derived mechanically from turtlebot3_gazebo's models/turtlebot3_world/model.sdf
 # (ros-humble-turtlebot3-gazebo) so the placements are upstream's, not retyped.
 
@@ -41,18 +48,22 @@ map: map/map.yaml
 
 # Expected world-space bounding box of the assembled stage, in metres.
 # build_world_usd.py checks the generated USD against this and fails loudly if
-# it disagrees. Optional per world, but strongly advised for anything using
-# Collada, because it is the only thing that catches the unit/up-axis trap:
+# it disagrees. Optional per world, strongly advised for any world with a mesh
+# in it: it is the only thing that catches a scale or axis misread, and both
+# produce a stage that loads without complaint.
 #
-#   Both meshes here declare `<unit name="inch" meter="0.0254"/>` and
-#   `up_axis Y_UP`, yet their vertices are laid out Z-up (the hexagon lies in
-#   XY, extruded along Z). Gazebo draws them upright, so Z-up is the parity
-#   truth. A converter that instead HONOURS the Y_UP header tips the Isaac
-#   arena on its side while Gazebo stays correct, and one that ignores <unit>
-#   makes it 39.4x too large. Neither reports an error.
+# It has now caught two, neither of which reported an error of its own:
 #
-# Computed analytically from the meshes and the placements below, under the
-# Z-up reading, i.e. from what Gazebo actually renders.
+#   - The asset converter authors converted layers in CENTIMETRES by default,
+#     so an OBJ in metres arrives 100x too small. (use_meter_as_world_unit.)
+#   - Collada declares a unit and an up axis and these files get both
+#     "wrong": `<unit name="inch" meter="0.0254"/>` and `up_axis Y_UP`, while
+#     the vertices are laid out Z-up. Gazebo ignores the axis and applies the
+#     unit, so Z-up at 0.0254 m is the parity truth. That is now baked into
+#     the .obj files beside this manifest -- see the note on meshes below.
+#
+# Computed analytically from the meshes and the placements below, from what
+# Gazebo actually renders.
 verify:
   bounds_min: [-3.2996, -3.3985, -0.5]
   bounds_max: [4.6732, 3.3985, 1.532]
@@ -96,26 +107,26 @@ bodies:
     xyz: [1.1, 1.1, 0.25]
     rpy: [0, 0, 0]
   - name: head
-    geometry: {type: mesh, uri: meshes/hexagon.dae, scale: [0.8, 0.8, 0.8]}
+    geometry: {type: mesh, uri: meshes/hexagon.obj, scale: [0.8, 0.8, 0.8]}
     xyz: [3.5, 0, -0.5]
     rpy: [0, 0, 0]
   - name: left_hand
-    geometry: {type: mesh, uri: meshes/hexagon.dae, scale: [0.55, 0.55, 0.55]}
+    geometry: {type: mesh, uri: meshes/hexagon.obj, scale: [0.55, 0.55, 0.55]}
     xyz: [1.8, 2.7, 0]
     rpy: [0, 0, 0]
   - name: right_hand
-    geometry: {type: mesh, uri: meshes/hexagon.dae, scale: [0.55, 0.55, 0.55]}
+    geometry: {type: mesh, uri: meshes/hexagon.obj, scale: [0.55, 0.55, 0.55]}
     xyz: [1.8, -2.7, 0]
     rpy: [0, 0, 0]
   - name: left_foot
-    geometry: {type: mesh, uri: meshes/hexagon.dae, scale: [0.55, 0.55, 0.55]}
+    geometry: {type: mesh, uri: meshes/hexagon.obj, scale: [0.55, 0.55, 0.55]}
     xyz: [-1.8, 2.7, 0]
     rpy: [0, 0, 0]
   - name: right_foot
-    geometry: {type: mesh, uri: meshes/hexagon.dae, scale: [0.55, 0.55, 0.55]}
+    geometry: {type: mesh, uri: meshes/hexagon.obj, scale: [0.55, 0.55, 0.55]}
     xyz: [-1.8, -2.7, 0]
     rpy: [0, 0, 0]
   - name: body
-    geometry: {type: mesh, uri: meshes/wall.dae, scale: [0.25, 0.25, 0.25]}
+    geometry: {type: mesh, uri: meshes/wall.obj, scale: [0.25, 0.25, 0.25]}
     xyz: [0, 0, -0.3]
     rpy: [0, 0, -1.5708]

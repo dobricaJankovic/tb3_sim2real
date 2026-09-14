@@ -77,25 +77,63 @@ ROOT_PRIM = '/World'
 STAMP_KEY = 'tb3_source_sha256'
 
 
-async def _convert(src, dst):
+def converter_context():
+    """The asset converter settings, and a guard against misspelling them.
+
+    AssetConverterContext is a plain Python object: assigning an attribute it
+    does not have succeeds silently and does nothing. `ignore_animation` and
+    `ignore_cameras` were set here from the beginning; the real names are
+    `ignore_animations` and `ignore_camera`, so neither ever applied, and
+    nothing reported it because the defaults happened to be harmless. Settings
+    go through the dict below, which refuses a name the context does not
+    already carry.
+    """
+    settings = {
+        # Keep materials: the arena should look like the Gazebo one, and the RTX
+        # lidar traces render geometry, so visuals are not merely cosmetic here.
+        'ignore_materials': False,
+        'ignore_animations': True,
+        'ignore_camera': True,
+
+        # METRES. The converter's default is CENTIMETRES: it authors the
+        # converted layer with metersPerUnit = 0.01, and USD scales a reference
+        # by the ratio of the two layers' units, so a mesh whose vertices are in
+        # metres arrives in our metres stage exactly 100x too small. A format
+        # that declares its own unit (Collada's `<unit meter="...">`) escapes
+        # this; OBJ and STL, which declare nothing, do not. Caught by the
+        # manifest's `verify` bounds on the first OBJ world built here, having
+        # been invisible for every Collada one.
+        'use_meter_as_world_unit': True,
+
+        # Label the converted stage Z-up. Measured behaviour (probe script,
+        # asset_converter 6.0.1): this flag moves NO geometry -- bounds are
+        # identical with and without it -- it only sets the stage's upAxis
+        # metadata.
+        #
+        # That is exactly what is needed here. turtlebot3_world's Collada files
+        # declare `up_axis Y_UP` but lay their vertices out Z-up, and the
+        # converter faithfully copies both the vertices and the (wrong) label.
+        # A stage labelled Y-up then makes add_reference_to_stage insert a
+        # corrective 90-degree X rotation when referencing into our Z-up world,
+        # tipping the arena on its side while Gazebo, which ignores the label,
+        # stays upright. Correcting the label removes the correction.
+        'convert_stage_up_z': True,
+    }
+
     ctx = omni.kit.asset_converter.AssetConverterContext()
-    # Keep materials: the arena should look like the Gazebo one, and the RTX
-    # lidar traces render geometry, so visuals are not merely cosmetic here.
-    ctx.ignore_materials = False
-    ctx.ignore_animation = True
-    ctx.ignore_cameras = True
-    # Label the converted stage Z-up. Measured behaviour (probe script,
-    # asset_converter 6.0.1): this flag moves NO geometry — bounds are identical
-    # with and without it — it only sets the stage's upAxis metadata.
-    #
-    # That is exactly what is needed here. These Collada files declare
-    # `up_axis Y_UP` but lay their vertices out Z-up, and the converter faithfully
-    # copies both the vertices and the (wrong) label. A stage labelled Y-up then
-    # makes add_reference_to_stage insert a corrective 90-degree X rotation when
-    # referencing into our Z-up world, tipping the arena on its side while Gazebo
-    # — which ignores the label — stays upright. Correcting the label removes the
-    # correction.
-    ctx.convert_stage_up_z = True
+    unknown = [k for k in sorted(settings) if not hasattr(ctx, k)]
+    if unknown:
+        raise SystemExit(
+            f'build_world_usd: AssetConverterContext has no {unknown} in this '
+            f'Isaac Sim. Assigning them would silently do nothing; check the '
+            f'spelling against dir(AssetConverterContext()).')
+    for k, v in settings.items():
+        setattr(ctx, k, v)
+    return ctx, settings
+
+
+async def _convert(src, dst):
+    ctx, _ = converter_context()
     task = omni.kit.asset_converter.get_instance().create_converter_task(
         src, dst, lambda *_: None, ctx)
     ok = await task.wait_until_finished()
@@ -123,6 +161,38 @@ def out_dir(world_dir):
     return d
 
 
+def invalidate_on_settings(cache):
+    """Clear the mesh cache when the converter settings change.
+
+    The cache is keyed on mtime alone, so a flag change would otherwise reuse
+    meshes converted under the OLD settings and the rebuild you just ran would
+    not be the rebuild you thought. That is how a 100x scale error survives
+    being fixed.
+    """
+    _, settings = converter_context()
+    stamp = hashlib.sha256(
+        repr(sorted(settings.items())).encode()).hexdigest()[:16]
+    marker = os.path.join(cache, '.settings')
+    current = None
+    if os.path.isfile(marker):
+        with open(marker) as f:
+            current = f.read().strip()
+    if current == stamp:
+        return
+
+    # A MISSING marker counts as a mismatch, not as "nothing to do". A cache
+    # written before this function existed is exactly the stale one it is here
+    # to catch, and treating an absent marker as clean silently reused meshes
+    # converted at the wrong scale on the very run that fixed the scale.
+    stale = [n for n in os.listdir(cache) if n != '.settings']
+    for n in stale:
+        os.remove(os.path.join(cache, n))
+    if stale:
+        print(f'  converter settings changed: cleared {len(stale)} cached mesh(es)')
+    with open(marker, 'w') as f:
+        f.write(stamp + '\n')
+
+
 def convert_mesh(world_dir, rel_uri):
     """Convert one mesh to USD, cached. Returns the converted .usd path."""
     src = os.path.join(world_dir, rel_uri)
@@ -130,6 +200,7 @@ def convert_mesh(world_dir, rel_uri):
         raise SystemExit(f'build_world_usd: manifest references missing mesh {src}')
     cache = os.path.join(out_dir(world_dir), '_converted')
     os.makedirs(cache, exist_ok=True)
+    invalidate_on_settings(cache)
     # This container is root and the checkout is yours, so a default-mode cache
     # directory is one you cannot clear. That matters more than it sounds: the
     # cache is keyed on mtime only, so a stale entry is reused silently after a
