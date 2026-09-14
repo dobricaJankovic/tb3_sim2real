@@ -97,6 +97,22 @@ gzserver come up with an empty scene.
 ```bash
 scripts/check_worlds.py                   # stdlib only, under a second
 ```
+A world that was designed rather than cloned from a real room has no recorded
+map, so `nav:=true` has nothing to localise against; `scripts/make_map.py <name>`
+writes one from the manifest. Read the warning at the top of that script first —
+it is the narrow case, not the habit.
+
+To see a stage rather than measure it:
+
+```bash
+docker compose run --rm tb3_ros isaacsim-python /repo/scripts/snapshot.py \
+    --world small_office
+```
+
+which renders it headless to `worlds/<name>/isaac/snapshot.png`. That exists
+because the last bug in this area was a stage that loaded, collided and measured
+correctly and rendered entirely grey.
+
 
 verifies that every world's generated artifacts still came from its manifest,
 that nobody hand-edited one, and that the model still matches the map recorded

@@ -27,6 +27,11 @@ every backend: gzserver loads its `.world`, Kit opens its `.usd`, and the real
 robot loads nothing but takes the same spawn pose and the same Nav2 map. It
 takes a registry name or a path, so your own environment needs no entry here.
 
+Three come with the repository: `turtlebot3_world` (ROBOTIS' arena),
+`empty_stage`, and `small_office` — a 6 x 5 m room written as six boxes and
+furnished with meshes, because a chair back is curved and its convex hull is a
+solid wedge.
+
 Worlds live in [`worlds/`](worlds/README.md), one directory each.
 `world.yaml` is the source of truth; both simulators' representations are
 generated from it and the meshes are shared byte-for-byte, so the two backends
@@ -52,7 +57,26 @@ worlds/            the world registry; world.yaml is the source of truth
 scripts/           the generators, the cloner, the drift check, the images
 docker/            one thin layer over the Isaac Sim + ROS 2 base image
 src/               source dependencies, imported by scripts/workspace.sh
+measurements/      recorded backend comparisons (see below)
 ```
+
+## Comparing the backends
+
+The claim that three backends are interchangeable is only worth something if it
+is measured, and it has to be measured with **one** instrument — a per-backend
+script would be a per-backend result.
+
+```bash
+ros2 run tb3_bringup drive_test --ros-args -p label:=gazebo -p out:=/tmp/g.json
+ros2 run tb3_bringup drive_test --ros-args -p sequence:=collide -p label:=isaacsim -p out:=/tmp/i.json
+```
+
+It publishes an identical open-loop `/cmd_vel` sequence and records `/odom`,
+both of which every backend is contracted to provide — so it runs unchanged on
+`real` as well. Open loop on purpose: Nav2 would correct exactly the errors
+being measured. `sequence:=collide` drives into a wall and keeps driving, which
+is how you find out whether odometry integrates distance the robot never
+travelled.
 
 The Isaac Sim backend is [`turtlebot3_isaacsim`][tb3i], a peer of
 `turtlebot3_gazebo` developed in its own repository and **imported** here, never

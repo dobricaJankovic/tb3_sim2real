@@ -29,15 +29,29 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy
 # them for the arc, because the interesting differences are in acceleration and
 # wheel-slip handling, not in saturation. A settle phase brackets the run so
 # odometry drift at rest is separable from drift under motion.
-SEQUENCE = [
-    ('settle_pre', 0.00, 0.00, 2.0),
-    ('straight', 0.15, 0.00, 5.0),
-    ('stop_1', 0.00, 0.00, 2.0),
-    ('rotate', 0.00, 0.50, 5.0),
-    ('stop_2', 0.00, 0.00, 2.0),
-    ('arc', 0.10, 0.30, 5.0),
-    ('settle_post', 0.00, 0.00, 3.0),
-]
+SEQUENCES = {
+    'default': [
+        ('settle_pre', 0.00, 0.00, 2.0),
+        ('straight', 0.15, 0.00, 5.0),
+        ('stop_1', 0.00, 0.00, 2.0),
+        ('rotate', 0.00, 0.50, 5.0),
+        ('stop_2', 0.00, 0.00, 2.0),
+        ('arc', 0.10, 0.30, 5.0),
+        ('settle_post', 0.00, 0.00, 3.0),
+    ],
+    # Drive into something and keep driving. The question is not whether the
+    # robot stops -- both simulators will stop it -- but what the ODOMETRY does
+    # once it has: wheels that keep turning against a wall integrate distance
+    # the robot never travelled, and that error is unbounded and invisible to
+    # Nav2, which is why this is worth measuring rather than assuming.
+    'collide': [
+        ('settle_pre', 0.00, 0.00, 2.0),
+        ('approach', 0.15, 0.00, 14.0),
+        ('rest', 0.00, 0.00, 3.0),
+        ('reverse', -0.10, 0.00, 3.0),
+        ('settle_post', 0.00, 0.00, 3.0),
+    ],
+}
 
 RATE = 20.0  # Hz, for both publishing and sampling
 
@@ -53,8 +67,15 @@ class DriveTest(Node):
         super().__init__('drive_test')
         self.declare_parameter('label', 'unknown')
         self.declare_parameter('out', '')
+        self.declare_parameter('sequence', 'default')
         self.label = self.get_parameter('label').value
         self.out = self.get_parameter('out').value
+        name = self.get_parameter('sequence').value
+        if name not in SEQUENCES:
+            raise SystemExit('drive_test: sequence must be one of {}'.format(
+                ', '.join(SEQUENCES)))
+        self.sequence_name = name
+        self.sequence = SEQUENCES[name]
 
         self.pub = self.create_publisher(Twist, 'cmd_vel', 10)
         # Odometry is published RELIABLE by all three backends; ask for the same
@@ -91,7 +112,7 @@ class DriveTest(Node):
     def run(self):
         self.wait_for_odom()
         results = []
-        for name, lin, ang, secs in SEQUENCE:
+        for name, lin, ang, secs in self.sequence:
             msg = Twist()
             msg.linear.x, msg.angular.z = lin, ang
             start = self._pose()
@@ -109,7 +130,8 @@ class DriveTest(Node):
                     name, lin, ang, results[-1]['distance'], results[-1]['d_yaw']))
 
         self.pub.publish(Twist())
-        report = {'label': self.label, 'sequence': results,
+        report = {'label': self.label, 'sequence_name': self.sequence_name,
+                  'sequence': results,
                   'final': self._pose(), 'samples': self.samples}
         if self.out:
             with open(self.out, 'w') as f:
