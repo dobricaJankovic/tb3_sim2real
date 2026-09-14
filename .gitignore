@@ -3,6 +3,11 @@ build/
 install/
 log/
 
+# Source dependencies, fetched by scripts/workspace.sh from tb3_sim2real.repos.
+# Imported, never vendored: a copy of turtlebot3_isaacsim in this tree would be
+# a second source of truth for the Isaac Sim side.
+src/
+
 # python
 __pycache__/
 *.py[cod]

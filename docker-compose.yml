@@ -89,6 +89,8 @@ services:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - ${TB3_XAUTH:-/tmp/tb3_sim2real.docker.xauth}:/root/.Xauthority:ro
       - ./tb3_bringup:/ws/src/tb3_bringup   # edit on host, colcon build inside
+      - ../turtlebot3_ws/src/turtlebot3_isaacsim:/ws/src/turtlebot3_isaacsim
+      - ../IsaacSim-ros_workspaces/humble_ws/src/isaacsim_bringup:/ws/src/isaacsim_bringup
       - ./isaac/scenes:/scenes              # rw: the URDF importer writes here
       - ./isaac/scripts:/scripts:ro
       # rw: build_world_usd.py writes <name>.usd back beside the manifest.

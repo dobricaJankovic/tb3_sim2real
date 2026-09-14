@@ -1,0 +1,23 @@
+# Source dependencies, imported with vcstool:
+#
+#   scripts/workspace.sh          # vcs import + colcon ignores, idempotent
+#
+# Neither of these is on apt, and neither is vendored into this repository —
+# that is the point. turtlebot3_isaacsim is developed as a peer of
+# turtlebot3_gazebo in its own repository and imported here; a copy in this tree
+# would be a second source of truth for the Isaac Sim side, which is exactly the
+# thing this repository exists to prevent.
+repositories:
+  turtlebot3_isaacsim:
+    type: git
+    url: git@github.com:dobrica-jankovic/turtlebot3_isaacsim.git
+    version: fix-map-mirroring-add-small-worlds
+
+  # NVIDIA ships isaacsim_bringup as source only, inside a repository that also
+  # holds eight other example packages. scripts/workspace.sh drops a
+  # COLCON_IGNORE in each of those, so colcon builds the one we include from
+  # (launch/run_isaacsim.launch.py) and nothing else.
+  IsaacSim-ros_workspaces:
+    type: git
+    url: https://github.com/isaac-sim/IsaacSim-ros_workspaces.git
+    version: IsaacSim-6.1.0
