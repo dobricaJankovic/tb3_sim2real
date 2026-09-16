@@ -1,0 +1,418 @@
+{
+ "cases": [
+  {
+   "case": "240Hz iters=default",
+   "physics_hz": 240.0,
+   "solver_iters": null,
+   "sleep_disabled": false,
+   "points": [
+    {
+     "mode": "diff",
+     "cmd": 0.2,
+     "target_rad_s": 0.48485,
+     "got": 0.36221,
+     "err_rad_s": 0.122635,
+     "err_pct": 25.293,
+     "sd_l": 0.16427,
+     "sd_r": 0.11885
+    },
+    {
+     "mode": "diff",
+     "cmd": 0.5,
+     "target_rad_s": 1.21212,
+     "got": 1.1067,
+     "err_rad_s": 0.105424,
+     "err_pct": 8.697,
+     "sd_l": 0.23046,
+     "sd_r": 0.06365
+    },
+    {
+     "mode": "diff",
+     "cmd": 1.0,
+     "target_rad_s": 2.42424,
+     "got": 2.34214,
+     "err_rad_s": 0.082099,
+     "err_pct": 3.387,
+     "sd_l": 0.26121,
+     "sd_r": 0.07613
+    },
+    {
+     "mode": "common",
+     "cmd": 0.1,
+     "target_rad_s": 3.0303,
+     "got": 3.02248,
+     "err_rad_s": 0.007826,
+     "err_pct": 0.258,
+     "sd_l": 0.01045,
+     "sd_r": 0.00913
+    },
+    {
+     "mode": "common",
+     "cmd": 0.15,
+     "target_rad_s": 4.54545,
+     "got": 4.5427,
+     "err_rad_s": 0.002756,
+     "err_pct": 0.061,
+     "sd_l": 0.01186,
+     "sd_r": 0.01084
+    },
+    {
+     "mode": "common",
+     "cmd": 0.22,
+     "target_rad_s": 6.66667,
+     "got": 6.65925,
+     "err_rad_s": 0.007413,
+     "err_pct": 0.111,
+     "sd_l": 0.02284,
+     "sd_r": 0.02107
+    }
+   ],
+   "rtf": 0.15
+  },
+  {
+   "case": "240Hz iters=default nosleep",
+   "physics_hz": 240.0,
+   "solver_iters": null,
+   "sleep_disabled": true,
+   "points": [
+    {
+     "mode": "diff",
+     "cmd": 0.2,
+     "target_rad_s": 0.48485,
+     "got": 0.34624,
+     "err_rad_s": 0.138605,
+     "err_pct": 28.587,
+     "sd_l": 0.06285,
+     "sd_r": 0.09701
+    },
+    {
+     "mode": "diff",
+     "cmd": 0.5,
+     "target_rad_s": 1.21212,
+     "got": 1.10043,
+     "err_rad_s": 0.111687,
+     "err_pct": 9.214,
+     "sd_l": 0.25705,
+     "sd_r": 0.09741
+    },
+    {
+     "mode": "diff",
+     "cmd": 1.0,
+     "target_rad_s": 2.42424,
+     "got": 2.36163,
+     "err_rad_s": 0.062612,
+     "err_pct": 2.583,
+     "sd_l": 0.1759,
+     "sd_r": 0.27339
+    },
+    {
+     "mode": "common",
+     "cmd": 0.1,
+     "target_rad_s": 3.0303,
+     "got": 3.02235,
+     "err_rad_s": 0.007958,
+     "err_pct": 0.263,
+     "sd_l": 0.00933,
+     "sd_r": 0.0082
+    },
+    {
+     "mode": "common",
+     "cmd": 0.15,
+     "target_rad_s": 4.54545,
+     "got": 4.53268,
+     "err_rad_s": 0.012779,
+     "err_pct": 0.281,
+     "sd_l": 0.01078,
+     "sd_r": 0.01024
+    },
+    {
+     "mode": "common",
+     "cmd": 0.22,
+     "target_rad_s": 6.66667,
+     "got": 6.65491,
+     "err_rad_s": 0.011756,
+     "err_pct": 0.176,
+     "sd_l": 0.01372,
+     "sd_r": 0.01312
+    }
+   ],
+   "rtf": 0.145
+  },
+  {
+   "case": "240Hz iters=64 nosleep",
+   "physics_hz": 240.0,
+   "solver_iters": 64,
+   "sleep_disabled": true,
+   "points": [
+    {
+     "mode": "diff",
+     "cmd": 0.2,
+     "target_rad_s": 0.48485,
+     "got": 0.24287,
+     "err_rad_s": 0.241981,
+     "err_pct": 49.909,
+     "sd_l": 0.54804,
+     "sd_r": 0.47179
+    },
+    {
+     "mode": "diff",
+     "cmd": 0.5,
+     "target_rad_s": 1.21212,
+     "got": 1.23674,
+     "err_rad_s": -0.024623,
+     "err_pct": -2.031,
+     "sd_l": 0.67473,
+     "sd_r": 0.19957
+    },
+    {
+     "mode": "diff",
+     "cmd": 1.0,
+     "target_rad_s": 2.42424,
+     "got": 2.4266,
+     "err_rad_s": -0.002358,
+     "err_pct": -0.097,
+     "sd_l": 0.90792,
+     "sd_r": 0.48022
+    },
+    {
+     "mode": "common",
+     "cmd": 0.1,
+     "target_rad_s": 3.0303,
+     "got": 3.02471,
+     "err_rad_s": 0.005595,
+     "err_pct": 0.185,
+     "sd_l": 0.12187,
+     "sd_r": 0.07266
+    },
+    {
+     "mode": "common",
+     "cmd": 0.15,
+     "target_rad_s": 4.54545,
+     "got": 4.53653,
+     "err_rad_s": 0.008921,
+     "err_pct": 0.196,
+     "sd_l": 0.04187,
+     "sd_r": 0.06469
+    },
+    {
+     "mode": "common",
+     "cmd": 0.22,
+     "target_rad_s": 6.66667,
+     "got": 6.67233,
+     "err_rad_s": -0.005668,
+     "err_pct": -0.085,
+     "sd_l": 0.09618,
+     "sd_r": 0.08479
+    }
+   ],
+   "rtf": 0.145
+  },
+  {
+   "case": "480Hz iters=default nosleep",
+   "physics_hz": 480.0,
+   "solver_iters": null,
+   "sleep_disabled": true,
+   "points": [
+    {
+     "mode": "diff",
+     "cmd": 0.2,
+     "target_rad_s": 0.48485,
+     "got": 0.46842,
+     "err_rad_s": 0.016426,
+     "err_pct": 3.388,
+     "sd_l": 0.16988,
+     "sd_r": 0.08901
+    },
+    {
+     "mode": "diff",
+     "cmd": 0.5,
+     "target_rad_s": 1.21212,
+     "got": 1.1656,
+     "err_rad_s": 0.046524,
+     "err_pct": 3.838,
+     "sd_l": 0.14764,
+     "sd_r": 0.16118
+    },
+    {
+     "mode": "diff",
+     "cmd": 1.0,
+     "target_rad_s": 2.42424,
+     "got": 2.43578,
+     "err_rad_s": -0.01154,
+     "err_pct": -0.476,
+     "sd_l": 0.13764,
+     "sd_r": 0.13159
+    },
+    {
+     "mode": "common",
+     "cmd": 0.1,
+     "target_rad_s": 3.0303,
+     "got": 3.03033,
+     "err_rad_s": -3e-05,
+     "err_pct": -0.001,
+     "sd_l": 0.01813,
+     "sd_r": 0.01747
+    },
+    {
+     "mode": "common",
+     "cmd": 0.15,
+     "target_rad_s": 4.54545,
+     "got": 4.54327,
+     "err_rad_s": 0.002185,
+     "err_pct": 0.048,
+     "sd_l": 0.04782,
+     "sd_r": 0.04596
+    },
+    {
+     "mode": "common",
+     "cmd": 0.22,
+     "target_rad_s": 6.66667,
+     "got": 6.66311,
+     "err_rad_s": 0.003554,
+     "err_pct": 0.053,
+     "sd_l": 0.09021,
+     "sd_r": 0.07032
+    }
+   ],
+   "rtf": 0.072
+  },
+  {
+   "case": "480Hz iters=64 nosleep",
+   "physics_hz": 480.0,
+   "solver_iters": 64,
+   "sleep_disabled": true,
+   "points": [
+    {
+     "mode": "diff",
+     "cmd": 0.2,
+     "target_rad_s": 0.48485,
+     "got": 0.4212,
+     "err_rad_s": 0.063645,
+     "err_pct": 13.127,
+     "sd_l": 0.46553,
+     "sd_r": 0.46222
+    },
+    {
+     "mode": "diff",
+     "cmd": 0.5,
+     "target_rad_s": 1.21212,
+     "got": 1.24823,
+     "err_rad_s": -0.03611,
+     "err_pct": -2.979,
+     "sd_l": 0.64121,
+     "sd_r": 0.51211
+    },
+    {
+     "mode": "diff",
+     "cmd": 1.0,
+     "target_rad_s": 2.42424,
+     "got": 2.47341,
+     "err_rad_s": -0.049163,
+     "err_pct": -2.028,
+     "sd_l": 0.30572,
+     "sd_r": 0.21016
+    },
+    {
+     "mode": "common",
+     "cmd": 0.1,
+     "target_rad_s": 3.0303,
+     "got": 3.03571,
+     "err_rad_s": -0.005408,
+     "err_pct": -0.178,
+     "sd_l": 0.09537,
+     "sd_r": 0.11136
+    },
+    {
+     "mode": "common",
+     "cmd": 0.15,
+     "target_rad_s": 4.54545,
+     "got": 4.54679,
+     "err_rad_s": -0.001338,
+     "err_pct": -0.029,
+     "sd_l": 0.17714,
+     "sd_r": 0.15096
+    },
+    {
+     "mode": "common",
+     "cmd": 0.22,
+     "target_rad_s": 6.66667,
+     "got": 6.6534,
+     "err_rad_s": 0.013266,
+     "err_pct": 0.199,
+     "sd_l": 0.24579,
+     "sd_r": 0.20275
+    }
+   ],
+   "rtf": 0.07
+  },
+  {
+   "case": "960Hz iters=64 nosleep",
+   "physics_hz": 960.0,
+   "solver_iters": 64,
+   "sleep_disabled": true,
+   "points": [
+    {
+     "mode": "diff",
+     "cmd": 0.2,
+     "target_rad_s": 0.48485,
+     "got": 0.49076,
+     "err_rad_s": -0.00591,
+     "err_pct": -1.219,
+     "sd_l": 0.49891,
+     "sd_r": 0.49512
+    },
+    {
+     "mode": "diff",
+     "cmd": 0.5,
+     "target_rad_s": 1.21212,
+     "got": 1.21094,
+     "err_rad_s": 0.001185,
+     "err_pct": 0.098,
+     "sd_l": 0.39892,
+     "sd_r": 0.42493
+    },
+    {
+     "mode": "diff",
+     "cmd": 1.0,
+     "target_rad_s": 2.42424,
+     "got": 2.45875,
+     "err_rad_s": -0.034506,
+     "err_pct": -1.423,
+     "sd_l": 0.30966,
+     "sd_r": 0.33226
+    },
+    {
+     "mode": "common",
+     "cmd": 0.1,
+     "target_rad_s": 3.0303,
+     "got": 3.04012,
+     "err_rad_s": -0.009821,
+     "err_pct": -0.324,
+     "sd_l": 0.20241,
+     "sd_r": 0.18349
+    },
+    {
+     "mode": "common",
+     "cmd": 0.15,
+     "target_rad_s": 4.54545,
+     "got": 4.5467,
+     "err_rad_s": -0.001242,
+     "err_pct": -0.027,
+     "sd_l": 0.57065,
+     "sd_r": 0.49464
+    },
+    {
+     "mode": "common",
+     "cmd": 0.22,
+     "target_rad_s": 6.66667,
+     "got": 6.66112,
+     "err_rad_s": 0.005547,
+     "err_pct": 0.083,
+     "sd_l": 0.9811,
+     "sd_r": 0.89621
+    }
+   ],
+   "rtf": 0.033
+  }
+ ]
+}

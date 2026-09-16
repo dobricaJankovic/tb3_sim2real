@@ -302,3 +302,81 @@ Why yaw is the worse mode is therefore **not** settled. It is the softer degree
 of freedom and it is the one the caster contact couples into, but the caster
 test says the coupling is not through friction. Recorded as open in §9.
 
+## 6. A5 — the error decomposed into three layers
+
+Ground truth for the body pose is free in a simulator and impossible on
+hardware, so this is a use of the apparatus rather than a workaround for it.
+Getting it required one change per backend, and the two changes are not
+symmetric — which is itself the first result:
+
+| backend | what `/odom` is | ground truth from |
+|---|---|---|
+| gazebo | **wheel-integrated.** `/odom` and a forward integration of `/joint_states` agree to five decimals *by construction*, so slip is invisible in both | `/ground_truth/odom`, a P3D plugin added by `backends/gazebo.launch.py` |
+| isaacsim | **the true body pose.** `IsaacComputeOdometry` reads the chassis prim | `/odom` itself |
+| real | wheel-integrated, with real slip | **nothing** — the two lower layers are not separable at all |
+
+So the two simulators' `/odom` topics do not mean the same thing. Comparing
+them to each other compares an encoder model with a motion-capture system.
+
+### Gazebo, `sequence:=sweep` (`measurements/2026-09-16_pre_gazebo_sweep.json`)
+
+| phase | wheel-integrated | true body | `/odom` | wheel → body (slip) | body → odom |
+|---|---|---|---|---|---|
+| `lin_0.10` | 0.49307 m | 0.49377 m | 0.49307 m | +0.14% | −0.14% |
+| `lin_0.15` | 0.73576 m | 0.73771 m | 0.73576 m | +0.26% | −0.26% |
+| `lin_0.22` | 1.07147 m | 1.07565 m | 1.07895 m | +0.39% | +0.31% |
+| `rot_0.2` | 0.99226 rad | 0.99564 rad | 0.99224 rad | +0.34% | −0.34% |
+| `rot_0.5` | 2.47810 rad | 2.47215 rad | 2.47765 rad | −0.24% | +0.22% |
+
+**Every layer of the Gazebo chain agrees to better than 0.4%.** Command → wheel
+is exact (§2), wheel → body slips by a few tenths of a percent, and body → odom
+recovers it. There is essentially no actuation error, no slip and no odometry
+error to find.
+
+That is worth stating plainly rather than treating as a null: **the reference
+backend does not model the phenomena the sim-to-real gap is made of.** With
+`mu = 100000` on the wheels the tyres cannot slip, and with an ODE joint motor
+the actuator cannot lag. A controller tuned against Gazebo has never met either.
+
+## 7. Looking for an operating point that meets A4
+
+`measurements/isaac_drive_probe3.json`, `isaac_drive_probe4.json`. Error as a
+percentage of the commanded wheel velocity, over the A4 matrix; `sd` is the
+standard deviation of the joint velocity within the steady-state window, i.e.
+the chatter itself.
+
+| setting | rtf* | diff % at wz = 0.2 / 0.5 / 1.0 | common % at vx = 0.10 / 0.15 / 0.22 | typical sd (diff) |
+|---|---|---|---|---|
+| **60 Hz, as shipped** | 0.65 | **47.2 / 25.5 / 15.8** | 2.85 / 2.07 / 1.40 | ~0.45 |
+| 240 Hz | 0.15 | 25.3 / 8.70 / 3.39 | 0.26 / 0.06 / 0.11 | 0.12–0.26 |
+| 240 Hz, no sleep/stabilisation | 0.14 | 28.6 / 9.21 / 2.58 | 0.26 / 0.28 / 0.18 | 0.06–0.27 |
+| 240 Hz + 64 solver iterations | 0.14 | 49.9 / −2.03 / −0.10 | 0.19 / 0.20 / −0.09 | **0.47–0.91** |
+| **480 Hz** | 0.07 | **3.39 / 3.84 / −0.48** | **0.00 / 0.05 / 0.05** | **0.09–0.17** |
+| 480 Hz + 64 iterations | 0.07 | 13.1 / −2.98 / −2.03 | −0.18 / −0.03 / 0.20 | 0.21–0.64 |
+| 960 Hz + 64 iterations | 0.03 | −1.22 / 0.10 / −1.42 | −0.32 / −0.03 / 0.08 | 0.31–0.98 |
+
+\* as this probe accounts it; the real figure is measured through the launcher
+in §8, because `set_dt` sets PhysX sub-steps per frame rather than the frame
+rate itself.
+
+Three things fall out, and two of them are traps:
+
+1. **Disabling sleep and stabilisation does nothing** (25.3 → 28.6 at the worst
+   point, inside the scatter). The low-rate regime is not being clamped by a
+   velocity threshold. That hypothesis is dead.
+2. **More solver iterations is a trap.** It reduces the *mean* error — at 960 Hz
+   with 64 iterations every number is inside 1.5% — while **tripling the
+   chatter**: `sd` goes from 0.17 to 0.47–0.98 rad/s. The plant gets noisier and
+   its average gets better, and if only the mean is reported that reads as a
+   fix. It is not one: a controller has to track the actual signal, not its
+   average. **Do not raise the iteration count.**
+3. **The residual differential error is scatter, not bias.** At one fixed
+   setting the wz = 0.2 error came out 25.3, 28.6, 49.9, 3.4 and 13.1% in
+   different runs, and several rows are *negative* — the wheel overshoots. A
+   single-shot measurement of the pivot at 0.2 rad/s does not mean anything,
+   which is A6's question arriving early and uninvited.
+
+**The operating point is 480 Hz with the solver left alone.** Common mode is
+inside 0.06% at every speed, differential inside 3.9% and falling to 0.5% at
+1.0 rad/s, with the lowest chatter of any setting tried.
+
