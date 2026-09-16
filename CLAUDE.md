@@ -85,6 +85,8 @@ Read the one doc your task needs, not the set:
 - `docs/network.md` — reaching the real robot from the workstation when the
   two are on different subnets, and the `robot:=remote` split that goes with
   it. Read it the first time `ros2 topic list` comes back empty.
+- `docs/roadmap.md` — design decisions taken but not yet built, and the
+  ordered next steps. Read before starting new work on the real robot.
 - `docs/troubleshooting.md` — failure modes that don't throw errors.
 - `docs/history.md` — append-only session log. See the working agreement below:
   do not read it for context.
