@@ -56,6 +56,15 @@ def generate_launch_description():
         DeclareLaunchArgument('z_pose', default_value='0.01'),
         DeclareLaunchArgument('yaw', default_value='0.0'),
         DeclareLaunchArgument('headless', default_value='false'),
+        DeclareLaunchArgument(
+            'physics_hz', default_value='480.0',
+            description='PhysX sub-steps per simulated second. 480 because at '
+                        'the old 60 the wheels chatter instead of tracking '
+                        'their commanded velocity; see '
+                        'docs/worknotes/2026-09-17-lane-a-physics.md. Exposed '
+                        'here so that comparing two rates does not mean editing '
+                        'a default in an imported package and remembering to '
+                        'put it back.'),
 
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
@@ -63,7 +72,7 @@ def generate_launch_description():
             launch_arguments={
                 k: LaunchConfiguration(k) for k in (
                     'world', 'world_z', 'x_pose', 'y_pose', 'z_pose', 'yaw',
-                    'headless')
+                    'headless', 'physics_hz')
             }.items(),
         ),
     ])

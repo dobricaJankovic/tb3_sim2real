@@ -4,12 +4,22 @@ Overnight 2026-09-16/17, against the brief in
 `docs/worknotes/2026-09-16-overnight-brief.md` §2. Written for someone reading
 it cold.
 
-**Headline:** the leading hypothesis (H1, "the drive is damping-limited, raise
-the gain") is **dead**, and it was killed by a measurement rather than by
-argument. What replaces it is sharper and was not on the brief's list: the
-deficit is **differential-mode only**. Forward motion tracks its commanded
-wheel velocity to 96–98%; yaw tracks to 67–71%. A wheel in the arc phase
-*exceeds* its commanded velocity, which no resisting torque can cause.
+**Headline, in three lines:**
+
+1. **H1 is dead.** "The drive is damping-limited, raise the gain" was killed by
+   measurement, not argument: the damping moved 10,000x and the error did not
+   move at all. NVIDIA's documented `1.0e7` would have changed nothing.
+2. **The wheel is not slow, it is unstable.** Commanded a steady −1.2121 rad/s
+   it ranges over −2.91 to +1.04; the "30% under-rotation" on record since
+   2026-09-15 is the *mean of a chattering signal*. Gazebo's sd is 0.0000.
+3. **The cause is the wheel's collision shape** (§13). The wheels are cylinders,
+   which no solver here rolls exactly. Replacing them with spheres cuts the
+   chatter 40x at the original timestep. Running physics at 480 Hz — the fix
+   applied tonight — damps the same symptom and fixes translation completely;
+   the two together meet the whole acceptance matrix inside 0.54%.
+
+Tonight's shipped change is the 480 Hz sub-step rate. The collider is reported
+with numbers and deliberately not changed; §13 says why.
 
 ---
 
@@ -662,7 +672,64 @@ because it presents as a hung simulator.
 
 Rerunning it needs the `physics_hz` plumbing in §13 and about ten minutes.
 
-## 13. What is known, what is not, and what to do next
+## 13. The cause: it is the wheel collider
+
+The last test of the night, and it changes the recommendation.
+
+The wheels are `UsdGeom.Cylinder` prims. **Neither PhysX nor MuJoCo has a true
+rolling cylinder** — both approximate one, and a faceted wheel bumps as it
+rolls. A sphere of the same radius is the control: it touches at one exact
+point, every solver handles it analytically, and it rolls identically about the
+wheel axis. Swapped in memory, never on disk
+(`measurements/isaac_wheel_collider.json`):
+
+| | diff % at wz = 0.2 / 0.5 / 1.0 | common % at vx = 0.10 / 0.15 / 0.22 | chatter sd (diff) |
+|---|---|---|---|
+| 60 Hz, cylinder (as shipped) | 46.3 / 24.9 / 12.6 | 2.50 / 1.61 / 1.18 | 0.163 / 0.165 / 0.759 |
+| **60 Hz, sphere** | **13.9 / 6.5 / 3.9** | 2.79 / 1.86 / 1.28 | **0.0041 / 0.0163 / 0.0156** |
+| 480 Hz, cylinder (tonight's fix) | 4.9 / 3.9 / −0.9 | −0.04 / −0.04 / −0.04 | 0.135 / 0.249 / 0.171 |
+| **480 Hz, sphere** | **0.54 / 0.23 / 0.13** | **0.02 / 0.12 / −0.01** | **0.0032 / 0.0038 / 0.0034** |
+
+**Changing only the collider shape, at the original 60 Hz, cuts the chatter by
+a factor of 40** (sd 0.163 → 0.0041) and the differential error by 3.3x. No
+timestep change, no gain change.
+
+And the two effects are separable, which is the useful part:
+
+- **The cylinder causes the chatter.** A sphere removes it at any rate.
+- **The timestep causes the common-mode error.** A sphere does not help it at
+  all (2.50 → 2.79%); 480 Hz takes it to 0.04%.
+- **Together they meet A4 in full** — every cell of the acceptance matrix
+  inside 0.54%, both modes, with sd 0.003.
+
+So tonight's fix was damping a symptom. It is a real improvement and the
+mechanism was correctly identified as the contact solve, but **the source is
+the wheel's collision shape**, and that is an asset question.
+
+### Not the analytic-cylinder setting
+
+PhysX can represent cones and cylinders analytically instead of as convex
+hulls. Those settings do not exist in this build: `/physics/collisionCone...`
+and `/physics/collisionCylinderCustomGeometry` both read `None`, and forcing
+them produced results **bit-identical** to the baseline
+(`measurements/isaac_cylinder_custom.json`) — a clean negative control, and
+consistent with Isaac Sim 6.1 running Newton rather than classic PhysX.
+
+### Why the asset was NOT changed tonight
+
+A sphere is not a tyre. It touches at a point, so it does not resist sliding
+along the wheel axis or contribute to tipping resistance the way a 0.018 m-wide
+cylinder does. On flat ground driving forward that is invisible; for a robot
+that pivots on two wheels and a skid it may not be, and `small_office` has
+props to bump into. Swapping the collider is a change to how the robot contacts
+the world in **every** measurement this repository will ever take, and it
+should be chosen deliberately with lateral behaviour checked — not at the end
+of an unattended night on the strength of six numbers.
+
+The timestep fix is in and validated. The collider finding is reported with its
+measurements so the decision can be made in daylight.
+
+## 14. What is known, what is not, and what to do next
 
 ### Settled
 
@@ -678,16 +745,10 @@ Rerunning it needs the `physics_hz` plumbing in §13 and about ten minutes.
 
 ### Not settled
 
-1. **Why the differential mode is so much worse than the common mode.** Yaw is
-   the softer degree of freedom, but the obvious cause is excluded: taking the
-   caster's friction to 0 leaves the differential error unchanged (0.3482 →
-   0.3325) while it does help common mode (0.0833 → 0.0069).
-   **Next test:** the wheel colliders are `Cylinder` prims, and neither PhysX
-   nor MuJoCo has a true rolling cylinder — both approximate one. Re-run the
-   `FREE`/ground pair with the wheels replaced by spheres of the same radius.
-   If the differential error collapses, it is cylinder contact generation, and
-   the fix belongs in `import_turtlebot3.py` as a collider approximation rather
-   than in the timestep.
+1. ~~Why the differential mode is so much worse~~ — **answered in §13: the
+   cylinder wheel collider.** What remains open is the *decision*: sphere
+   colliders, some Newton-specific collider option not yet investigated, or
+   keeping the finer timestep. Needs a lateral-contact check either way.
 2. **Why the residual scatters so much at `wz = 0.2`** — 25.3, 28.6, 49.9, 3.4
    and 13.1% at one fixed setting. **Next test:** hold each rate for 30 s rather
    than 2.5 s and repeat 5x; decide whether the mean is converging slowly or the
@@ -703,15 +764,16 @@ Rerunning it needs the `physics_hz` plumbing in §13 and about ten minutes.
 
 ### Recommended next steps, in order
 
-1. **The sphere-collider test.** It is 40 minutes and it is the difference
-   between "we damped the symptom with a finer timestep" and "we found the
-   cause". Everything else on this list is smaller.
-2. **Plumb `physics_hz` from the top.** `tb3_bringup/launch/backends/isaacsim.launch.py`
-   forwards seven arguments and not this one, so tonight's A/B was done by
-   editing a default in the imported package and putting it back — which is
-   exactly the kind of thing that silently does not get put back. One
-   `DeclareLaunchArgument` in the backend file; **it needs no change to
-   `bringup.launch.py`**, which lane C is rewriting.
+1. **Decide the wheel collider (§13).** Sphere colliders meet the full
+   acceptance matrix; the open question is what they cost laterally. Test: push
+   the robot sideways and into a prop with each shape and compare. If a sphere
+   holds up, the change belongs in `import_turtlebot3.py` and the physics rate
+   can probably come back down from 480 Hz, which buys back real time.
+2. **Finish plumbing `physics_hz`.** Done tonight at the backend:
+   `backends/isaacsim.launch.py` now declares and forwards it (default 480.0).
+   It is still not settable from `bringup.launch.py`, whose `backend_args` is a
+   fixed dict — **one line there**, deliberately left alone because lane C was
+   rewriting that file.
 3. **Rerun A8's before/after** once (2) exists, with 10 runs per cell per §10.
 4. **Fix `measurements/isaac_angular_deficit.md`.** Its conclusion ("the drive
    gain is too low for the wheel friction") is now known to be wrong, and it is
@@ -735,7 +797,7 @@ Rerunning it needs the `physics_hz` plumbing in §13 and about ten minutes.
 - **Not** that the gain in `import_turtlebot3.py` is correct. It is *unverified
   and irrelevant* — four decades of it change nothing measurable.
 
-## 14. Gates and housekeeping
+## 15. Gates and housekeeping
 
 - `scripts/check_worlds.py` **before**: 3/3 worlds consistent.
 - `scripts/check_worlds.py` **after**: 3/3 worlds consistent. No world artifact

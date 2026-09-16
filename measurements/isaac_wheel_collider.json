@@ -1,0 +1,258 @@
+{
+ "cases": [
+  {
+   "case": "60Hz cylinder",
+   "physics_hz": 60.0,
+   "sphere": false,
+   "swapped": [],
+   "points": [
+    {
+     "mode": "diff",
+     "cmd": 0.2,
+     "target_rad_s": 0.48485,
+     "got": 0.26031,
+     "err_pct": 46.311,
+     "sd_l": 0.16302,
+     "sd_r": 0.04889
+    },
+    {
+     "mode": "diff",
+     "cmd": 0.5,
+     "target_rad_s": 1.21212,
+     "got": 0.91006,
+     "err_pct": 24.92,
+     "sd_l": 0.16478,
+     "sd_r": 0.2592
+    },
+    {
+     "mode": "diff",
+     "cmd": 1.0,
+     "target_rad_s": 2.42424,
+     "got": 2.11973,
+     "err_pct": 12.561,
+     "sd_l": 0.75882,
+     "sd_r": 0.12234
+    },
+    {
+     "mode": "common",
+     "cmd": 0.1,
+     "target_rad_s": 3.0303,
+     "got": 2.95469,
+     "err_pct": 2.495,
+     "sd_l": 0.00644,
+     "sd_r": 0.0082
+    },
+    {
+     "mode": "common",
+     "cmd": 0.15,
+     "target_rad_s": 4.54545,
+     "got": 4.47217,
+     "err_pct": 1.612,
+     "sd_l": 0.014,
+     "sd_r": 0.03601
+    },
+    {
+     "mode": "common",
+     "cmd": 0.22,
+     "target_rad_s": 6.66667,
+     "got": 6.58787,
+     "err_pct": 1.182,
+     "sd_l": 0.0311,
+     "sd_r": 0.01921
+    }
+   ]
+  },
+  {
+   "case": "60Hz SPHERE",
+   "physics_hz": 60.0,
+   "sphere": true,
+   "swapped": [
+    "/World/turtlebot3/Geometry/base_footprint/wheel_left_link/sphere_probe",
+    "/World/turtlebot3/Geometry/base_footprint/wheel_right_link/sphere_probe"
+   ],
+   "points": [
+    {
+     "mode": "diff",
+     "cmd": 0.2,
+     "target_rad_s": 0.48485,
+     "got": 0.4176,
+     "err_pct": 13.87,
+     "sd_l": 0.0041,
+     "sd_r": 0.00883
+    },
+    {
+     "mode": "diff",
+     "cmd": 0.5,
+     "target_rad_s": 1.21212,
+     "got": 1.13276,
+     "err_pct": 6.547,
+     "sd_l": 0.01629,
+     "sd_r": 0.01248
+    },
+    {
+     "mode": "diff",
+     "cmd": 1.0,
+     "target_rad_s": 2.42424,
+     "got": 2.32924,
+     "err_pct": 3.919,
+     "sd_l": 0.0156,
+     "sd_r": 0.01055
+    },
+    {
+     "mode": "common",
+     "cmd": 0.1,
+     "target_rad_s": 3.0303,
+     "got": 2.94591,
+     "err_pct": 2.785,
+     "sd_l": 0.00034,
+     "sd_r": 0.00037
+    },
+    {
+     "mode": "common",
+     "cmd": 0.15,
+     "target_rad_s": 4.54545,
+     "got": 4.46089,
+     "err_pct": 1.86,
+     "sd_l": 0.00083,
+     "sd_r": 0.00077
+    },
+    {
+     "mode": "common",
+     "cmd": 0.22,
+     "target_rad_s": 6.66667,
+     "got": 6.58149,
+     "err_pct": 1.278,
+     "sd_l": 0.0014,
+     "sd_r": 0.00118
+    }
+   ]
+  },
+  {
+   "case": "480Hz cylinder",
+   "physics_hz": 480.0,
+   "sphere": false,
+   "swapped": [],
+   "points": [
+    {
+     "mode": "diff",
+     "cmd": 0.2,
+     "target_rad_s": 0.48485,
+     "got": 0.46087,
+     "err_pct": 4.945,
+     "sd_l": 0.13537,
+     "sd_r": 0.15382
+    },
+    {
+     "mode": "diff",
+     "cmd": 0.5,
+     "target_rad_s": 1.21212,
+     "got": 1.16435,
+     "err_pct": 3.942,
+     "sd_l": 0.24858,
+     "sd_r": 0.0791
+    },
+    {
+     "mode": "diff",
+     "cmd": 1.0,
+     "target_rad_s": 2.42424,
+     "got": 2.44522,
+     "err_pct": -0.866,
+     "sd_l": 0.17133,
+     "sd_r": 0.30231
+    },
+    {
+     "mode": "common",
+     "cmd": 0.1,
+     "target_rad_s": 3.0303,
+     "got": 3.03154,
+     "err_pct": -0.041,
+     "sd_l": 0.02202,
+     "sd_r": 0.02077
+    },
+    {
+     "mode": "common",
+     "cmd": 0.15,
+     "target_rad_s": 4.54545,
+     "got": 4.54703,
+     "err_pct": -0.035,
+     "sd_l": 0.06744,
+     "sd_r": 0.06192
+    },
+    {
+     "mode": "common",
+     "cmd": 0.22,
+     "target_rad_s": 6.66667,
+     "got": 6.66955,
+     "err_pct": -0.043,
+     "sd_l": 0.11122,
+     "sd_r": 0.1021
+    }
+   ]
+  },
+  {
+   "case": "480Hz SPHERE",
+   "physics_hz": 480.0,
+   "sphere": true,
+   "swapped": [
+    "/World/turtlebot3/Geometry/base_footprint/wheel_left_link/sphere_probe",
+    "/World/turtlebot3/Geometry/base_footprint/wheel_right_link/sphere_probe"
+   ],
+   "points": [
+    {
+     "mode": "diff",
+     "cmd": 0.2,
+     "target_rad_s": 0.48485,
+     "got": 0.48226,
+     "err_pct": 0.535,
+     "sd_l": 0.00324,
+     "sd_r": 0.00302
+    },
+    {
+     "mode": "diff",
+     "cmd": 0.5,
+     "target_rad_s": 1.21212,
+     "got": 1.20937,
+     "err_pct": 0.227,
+     "sd_l": 0.00378,
+     "sd_r": 0.00391
+    },
+    {
+     "mode": "diff",
+     "cmd": 1.0,
+     "target_rad_s": 2.42424,
+     "got": 2.42122,
+     "err_pct": 0.125,
+     "sd_l": 0.00336,
+     "sd_r": 0.003
+    },
+    {
+     "mode": "common",
+     "cmd": 0.1,
+     "target_rad_s": 3.0303,
+     "got": 3.02959,
+     "err_pct": 0.023,
+     "sd_l": 0.02452,
+     "sd_r": 0.02517
+    },
+    {
+     "mode": "common",
+     "cmd": 0.15,
+     "target_rad_s": 4.54545,
+     "got": 4.54009,
+     "err_pct": 0.118,
+     "sd_l": 0.0538,
+     "sd_r": 0.05244
+    },
+    {
+     "mode": "common",
+     "cmd": 0.22,
+     "target_rad_s": 6.66667,
+     "got": 6.6675,
+     "err_pct": -0.012,
+     "sd_l": 0.13967,
+     "sd_r": 0.12201
+    }
+   ]
+  }
+ ]
+}
