@@ -1459,3 +1459,132 @@ local costmap updating at 1.7 Hz off the real lidar. It stops there, and for a
 boring reason — the only map to hand was `turtlebot3_world`'s, which is not the
 room the robot is standing in, so `map->odom` never came. Cloning the actual
 room is the next step, and `scripts/clone_world.py` already exists for it.
+
+## 2026-09-16 (later) — one question instead of two, and what the robot told us before it went quiet
+
+Three roadmap items on the table: clock sync, SLAM, and the `robot:=` flag.
+Two of them got surveyed, one got built, and the robot itself supplied an
+unplanned fourth finding by breaking while we were reading it.
+
+### `robot:=local|remote` is gone
+
+The argument existed so `backend:=real` could mean two different things: the
+drivers on this machine over USB, or the drivers on the robot over the network.
+Only one of those is reachable for a robot that drives. `local` was never once
+passed with hardware behind it, and `remote` was a flag every real-robot
+command had to carry for no decision.
+
+What replaced it is not a default, it is a vocabulary. A run is a **robot
+layer** — drivers, odometry, `robot_state_publisher` — and a **workstation
+layer** — map server, localization, Nav2, RViz. `backend:=` answers one
+question, which is who provides the robot layer. Simulators provide it in this
+process tree; hardware provides it on the other machine. Then `backend:=real`
+starting no local processes stops looking like something missing.
+
+`backends/real.launch.py` was deleted rather than left sitting unreferenced.
+The temptation was to keep it — it is correct code and it cost work — but an
+unreferenced backend file is exactly the shape of the Isaac Sim copy that went
+four worlds stale, and the repo exists partly to not do that again. The way
+back to a tethered robot is to include upstream's `robot.launch.py`, not to
+maintain a private copy of it against the day a Jetson arrives. Its one piece
+of non-obvious knowledge survives as a comment: `turtlebot3_node` declares
+`namespace` as a *statically typed* parameter with no default, so it has to be
+passed as a parameter and not merely as a frame prefix, or the process aborts
+before it ever opens the serial port. We re-confirmed that live today by
+forgetting it.
+
+One consequence worth having written down: with no local processes for `real`,
+`backend:=real nav:=false` now starts literally nothing. It raises. The
+roadmap had already predicted this combination would need an explicit error;
+it arrived a step earlier than expected, as a direct consequence of this
+change rather than of SLAM.
+
+A stale `robot:=remote` in someone's shell history is harmless — `ros2 launch`
+ignores unknown arguments without complaint, which is usually a misfeature and
+here is a free migration path.
+
+### The clocks disagree by 157 ms, and it is not the boot transient
+
+The roadmap reasoned about clock skew from first principles: a Pi has no RTC,
+so it boots wrong and then jumps. All true. What we had not done was measure
+the *steady* state, and that turned out to be the more interesting number.
+
+Both machines are synced. Neither has chrony. Both run `systemd-timesyncd` —
+to **different upstreams**: the workstation to `ntp.ubuntu.com`, the Pi to
+`10.118.16.1`, a relay on its own Wi-Fi subnet. Two clocks each confidently
+correct against a different reference and never compared to each other.
+Near-simultaneous `date +%s.%N` puts them 157 ms apart, with ten days of
+uptime on the Pi, so nothing about that number is transient.
+
+157 ms is not a small number in this context. An LDS-01 scan period is 200 ms.
+Nav2's `transform_tolerance` is typically 0.2-0.3 s. The offset is already the
+same order as the margin the message filter has to work with, which makes the
+`Message Filter dropping message ... timestamp on the message is earlier than
+all the data in the transform cache` line from the morning's test look less
+like a startup transient than it did when we wrote that down.
+
+Two smaller corrections to the plan. The Pi has no `fake-hwclock` either —
+Ubuntu Server 22.04 does not ship it, unlike Raspberry Pi OS — so there is not
+even a last-known-good time to boot into; the clock free-runs and then steps,
+every single boot. And `initstepslew` is an `ntpd` directive that does not
+exist in chrony; `makestep 1.0 3`, which Ubuntu already ships in the stock
+config, is the whole story.
+
+The config landed in the roadmap rather than in a script, because `sudo` on the
+Pi wants a password and this is four lines typed by a human once. The one thing
+worth insisting on is `local stratum 10` on the workstation: without it chrony
+refuses to serve time while it considers itself unsynchronized, which is
+precisely the lab-with-no-internet case this whole arrangement is for.
+
+### slam_toolbox is not a lifecycle node, and the roadmap said it was
+
+The decision to use slam_toolbox over Cartographer stands, for the reason that
+mattered: it is what `nav2_bringup/slam_launch.py` itself runs, so `slam:=true`
+is an include of upstream rather than a parallel arrangement.
+
+The *second* reason given was wrong. The roadmap said slam_toolbox is a
+lifecycle node that comes up under Nav2's lifecycle manager instead of sitting
+outside it the way Cartographer would. On Humble it is a plain `rclcpp::Node` —
+no `LifecycleNode`, and no `use_lifecycle_manager` parameter anywhere in the
+package. `slam_launch.py` sets `lifecycle_nodes = ['map_saver']`; the manager
+governs `map_saver_server` and nothing else. slam_toolbox self-activates on
+construction. Caught before anything was built on the assumption, which is the
+whole point of surveying first.
+
+Two facts that will save time when it is built. `nav2_bringup/slam_launch.py`
+includes `online_sync_launch.py`, the *sync* node — not the
+`online_async_launch.py` that nearly every tutorial reaches for. And
+`bringup_launch.py` already performs exactly the switch we want, as
+`IfCondition(slam)` against `IfCondition(PythonExpression(['not ', slam]))`, so
+the minimal change is to declare `slam` in `common/nav2.launch.py` and forward
+it into the include that is already there. Upstream forks; we do not.
+
+### The robot broke while we were reading it, which was useful
+
+We had been told the TurtleBot3 might be powered down soon, so the session
+started by pulling everything off it: environment, workspace layout, udev
+rules, the burger param file, existing systemd units, whether sudo needs a
+password (it does), and the live ROS graph.
+
+The live graph is where it got interesting. `ros2 node list` returned
+`/hlds_laser_publisher` and `/robot_state_publisher` — and no
+`turtlebot3_node`. `/scan` was arriving at 4.5 Hz. The `ros2 launch` process
+was still running, an hour and three quarters after it started. Everything
+looked fine and `/odom` did not exist.
+
+`launch.log` on the robot had it: `process has died [exit code -6]`, which is
+`SIGABRT`, at a timestamp matching `/dev/ttyACM0`'s mtime — the OpenCR had
+re-enumerated on USB, not merely errored. Restarting the node by hand
+reproduced it in ten seconds: `[DynamixelSDKWrapper]: Failed to read
+[[TxRxResult] There is no status packet!]` followed by `*** stack smashing
+detected ***: terminated`. The Dynamixels are not answering, and the failed
+read walks off a buffer instead of being handled. `/battery_state` never
+publishes, because the sensor read that would fill it is the one that fails —
+so the diagnostic you would most want is the one the failure takes away. Low
+battery is the strong suspicion.
+
+The lesson is not about the OpenCR. It is that a half-dead robot presents as a
+live one: the lidar and the state publisher are separate processes and neither
+noticed. **Check for `/odom`, not for `/scan`** — or better, run
+`ros2 run tf2_ros tf2_echo odom base_footprint`, which fails loudly and
+immediately on exactly this. It is in `docs/troubleshooting.md` now.
