@@ -1,0 +1,286 @@
+{
+ "physics_hz": 60.0,
+ "robot": "/ws/install/turtlebot3_isaacsim/share/turtlebot3_isaacsim/models/turtlebot3_burger/turtlebot3_burger.usd",
+ "variant_selections": {
+  "/World/turtlebot3:Physics": "physx"
+ },
+ "joint_paths": {
+  "wheel_left_joint": "/World/turtlebot3/Physics/wheel_left_joint",
+  "wheel_right_joint": "/World/turtlebot3/Physics/wheel_right_joint"
+ },
+ "mjc_actuators": [],
+ "authored_drive": {
+  "wheel_left_joint": {
+   "has_DriveAPI": true,
+   "damping": 1745.3292236328125,
+   "stiffness": 0.0,
+   "max_force": null,
+   "target_velocity": null,
+   "type": "force"
+  },
+  "wheel_right_joint": {
+   "has_DriveAPI": true,
+   "damping": 1745.3292236328125,
+   "stiffness": 0.0,
+   "max_force": null,
+   "target_velocity": null,
+   "type": "force"
+  }
+ },
+ "joint_names": [
+  "wheel_left_joint",
+  "wheel_right_joint"
+ ],
+ "runtime_gains": {
+  "stiffness": [
+   0.0,
+   0.0
+  ],
+  "damping": [
+   100000.0,
+   100000.0
+  ]
+ },
+ "runtime_max_efforts": [
+  3.4028234663852886e+38,
+  3.4028234663852886e+38
+ ],
+ "solver_position_iteration_counts": "unavailable: int() argument must be a string, a bytes-like object or a real number, not 'NoneType'",
+ "solver_velocity_iteration_counts": "unavailable: int() argument must be a string, a bytes-like object or a real number, not 'NoneType'",
+ "damping_sweep": [
+  {
+   "authored_damping_per_deg": 17.453292,
+   "runtime_damping": 1000.0,
+   "points": [
+    {
+     "mode": "diff",
+     "target_rad_s": 0.48485,
+     "got_l": -0.2757,
+     "got_r": 0.25389,
+     "err_rad_s": 0.220056,
+     "track": 0.54614,
+     "err_times_D_SI": 220.0556
+    },
+    {
+     "mode": "diff",
+     "target_rad_s": 1.21212,
+     "got_l": -0.90883,
+     "got_r": 0.93978,
+     "err_rad_s": 0.287817,
+     "track": 0.76255,
+     "err_times_D_SI": 287.8169
+    },
+    {
+     "mode": "diff",
+     "target_rad_s": 2.42424,
+     "got_l": -2.15709,
+     "got_r": 2.14187,
+     "err_rad_s": 0.274761,
+     "track": 0.88666,
+     "err_times_D_SI": 274.7605
+    },
+    {
+     "mode": "diff",
+     "target_rad_s": 3.63636,
+     "got_l": -3.54997,
+     "got_r": 3.11132,
+     "err_rad_s": 0.305717,
+     "track": 0.91593,
+     "err_times_D_SI": 305.7172
+    },
+    {
+     "mode": "common",
+     "target_rad_s": 1.81818,
+     "got_l": 1.74593,
+     "got_r": 1.73776,
+     "err_rad_s": 0.07634,
+     "track": 0.95801,
+     "err_times_D_SI": 76.3399
+    },
+    {
+     "mode": "common",
+     "target_rad_s": 4.54545,
+     "got_l": 4.46166,
+     "got_r": 4.45459,
+     "err_rad_s": 0.087331,
+     "track": 0.98079,
+     "err_times_D_SI": 87.3311
+    },
+    {
+     "mode": "common",
+     "target_rad_s": 9.09091,
+     "got_l": 9.02346,
+     "got_r": 9.00962,
+     "err_rad_s": 0.074367,
+     "track": 0.99182,
+     "err_times_D_SI": 74.3674
+    },
+    {
+     "mode": "common",
+     "target_rad_s": 13.63636,
+     "got_l": 13.57219,
+     "got_r": 13.55321,
+     "err_rad_s": 0.073662,
+     "track": 0.9946,
+     "err_times_D_SI": 73.6625
+    }
+   ]
+  },
+  {
+   "authored_damping_per_deg": 1745.3292,
+   "runtime_damping": 100000.0,
+   "points": [
+    {
+     "mode": "diff",
+     "target_rad_s": 0.48485,
+     "got_l": -0.26864,
+     "got_r": 0.23693,
+     "err_rad_s": 0.232064,
+     "track": 0.52137,
+     "err_times_D_SI": 23206.419
+    },
+    {
+     "mode": "diff",
+     "target_rad_s": 1.21212,
+     "got_l": -0.86548,
+     "got_r": 0.9033,
+     "err_rad_s": 0.327728,
+     "track": 0.72962,
+     "err_times_D_SI": 32772.7978
+    },
+    {
+     "mode": "diff",
+     "target_rad_s": 2.42424,
+     "got_l": -2.08,
+     "got_r": 2.11999,
+     "err_rad_s": 0.324247,
+     "track": 0.86625,
+     "err_times_D_SI": 32424.7482
+    },
+    {
+     "mode": "diff",
+     "target_rad_s": 3.63636,
+     "got_l": -3.62231,
+     "got_r": 3.12681,
+     "err_rad_s": 0.261803,
+     "track": 0.928,
+     "err_times_D_SI": 26180.3083
+    },
+    {
+     "mode": "common",
+     "target_rad_s": 1.81818,
+     "got_l": 1.75122,
+     "got_r": 1.73637,
+     "err_rad_s": 0.074386,
+     "track": 0.95909,
+     "err_times_D_SI": 7438.5503
+    },
+    {
+     "mode": "common",
+     "target_rad_s": 4.54545,
+     "got_l": 4.46871,
+     "got_r": 4.45108,
+     "err_rad_s": 0.085559,
+     "track": 0.98118,
+     "err_times_D_SI": 8555.9044
+    },
+    {
+     "mode": "common",
+     "target_rad_s": 9.09091,
+     "got_l": 9.02023,
+     "got_r": 9.00354,
+     "err_rad_s": 0.079025,
+     "track": 0.99131,
+     "err_times_D_SI": 7902.5195
+    },
+    {
+     "mode": "common",
+     "target_rad_s": 13.63636,
+     "got_l": 13.56974,
+     "got_r": 13.54802,
+     "err_rad_s": 0.077482,
+     "track": 0.99432,
+     "err_times_D_SI": 7748.2112
+    }
+   ]
+  },
+  {
+   "authored_damping_per_deg": 174532.91999999998,
+   "runtime_damping": 10000000.0,
+   "points": [
+    {
+     "mode": "diff",
+     "target_rad_s": 0.48485,
+     "got_l": -0.2733,
+     "got_r": 0.25573,
+     "err_rad_s": 0.220333,
+     "track": 0.54556,
+     "err_times_D_SI": 2203326.5705
+    },
+    {
+     "mode": "diff",
+     "target_rad_s": 1.21212,
+     "got_l": -0.82784,
+     "got_r": 0.93224,
+     "err_rad_s": 0.332083,
+     "track": 0.72603,
+     "err_times_D_SI": 3320828.3342
+    },
+    {
+     "mode": "diff",
+     "target_rad_s": 2.42424,
+     "got_l": -2.09281,
+     "got_r": 2.03446,
+     "err_rad_s": 0.360607,
+     "track": 0.85125,
+     "err_times_D_SI": 3606068.918
+    },
+    {
+     "mode": "diff",
+     "target_rad_s": 3.63636,
+     "got_l": -3.54295,
+     "got_r": 3.14016,
+     "err_rad_s": 0.294808,
+     "track": 0.91893,
+     "err_times_D_SI": 2948084.9503
+    },
+    {
+     "mode": "common",
+     "target_rad_s": 1.81818,
+     "got_l": 1.74565,
+     "got_r": 1.74044,
+     "err_rad_s": 0.075135,
+     "track": 0.95868,
+     "err_times_D_SI": 751352.7796
+    },
+    {
+     "mode": "common",
+     "target_rad_s": 4.54545,
+     "got_l": 4.46832,
+     "got_r": 4.45332,
+     "err_rad_s": 0.084632,
+     "track": 0.98138,
+     "err_times_D_SI": 846319.6321
+    },
+    {
+     "mode": "common",
+     "target_rad_s": 9.09091,
+     "got_l": 9.02278,
+     "got_r": 9.00648,
+     "err_rad_s": 0.07628,
+     "track": 0.99161,
+     "err_times_D_SI": 762798.9298
+    },
+    {
+     "mode": "common",
+     "target_rad_s": 13.63636,
+     "got_l": 13.57107,
+     "got_r": 13.55292,
+     "err_rad_s": 0.074372,
+     "track": 0.99455,
+     "err_times_D_SI": 743721.2158
+    }
+   ]
+  }
+ ]
+}

@@ -18,6 +18,11 @@
   <!-- tb3_bringup/worlds.py parses the world registry's world.yaml manifests -->
   <exec_depend>python3-yaml</exec_depend>
 
+  <!-- drive_test: /cmd_vel, /odom, /joint_states, /ground_truth/odom -->
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+
   <!-- shared across all backends -->
   <exec_depend>robot_state_publisher</exec_depend>
   <exec_depend>turtlebot3_description</exec_depend>
