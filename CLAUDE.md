@@ -82,6 +82,9 @@ Read the one doc your task needs, not the set:
 - `worlds/README.md` — the registry AND the environment-cloning methodology:
   real room -> Nav2 map -> manifest -> both simulators, and what stops them
   drifting. This is the architectural core, not a reference appendix.
+- `docs/network.md` — reaching the real robot from the workstation when the
+  two are on different subnets, and the `robot:=remote` split that goes with
+  it. Read it the first time `ros2 topic list` comes back empty.
 - `docs/troubleshooting.md` — failure modes that don't throw errors.
 - `docs/history.md` — append-only session log. See the working agreement below:
   do not read it for context.

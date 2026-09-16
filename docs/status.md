@@ -146,10 +146,18 @@ The 324-vs-307 gap is the no-return encoding, not the geometry: Isaac reports
   `/initialpose` at the manifest's spawn produced `map->odom` at exactly
   `[-2.000, -0.500]`. Measured on a freshly restarted container; see the trap
   below for why that matters.
-- **`backend:=real`** — `robot_state_publisher`, the LDS driver and
-  `turtlebot3_node` all start and the node fails on
+- **`backend:=real robot:=remote`** — a real TurtleBot3 running its own stock
+  `turtlebot3_bringup` on the Wi-Fi subnet, reached from the container across a
+  router (2026-09-16, `docs/network.md`). All four robot nodes discovered,
+  `/scan` at 5 Hz, `/odom` at 20 Hz, `tf` `odom->base_footprint` resolving.
+  Nav2 loads: `map_server`, `amcl` and `controller_server` active and the local
+  costmap updating at 1.7 Hz from the real lidar. Not verified past that —
+  `planner_server` upward waits on `map->odom`, and the only map to hand was
+  `turtlebot3_world`'s, which is not the room the robot is in.
+- **`backend:=real` with the drivers local** — `robot_state_publisher`, the LDS
+  driver and `turtlebot3_node` all start and the node fails on
   `Failed to open the port(/dev/ttyACM0)`, which is the correct failure with no
-  OpenCR attached. That is as far as it goes without hardware.
+  OpenCR attached. Still untested with hardware plugged into this machine.
 - **`colcon build`** — 3 packages: `isaacsim_bringup`, `turtlebot3_isaacsim`,
   `tb3_bringup`.
 
@@ -195,9 +203,17 @@ else** — `docker compose restart tb3_ros` is the reliable reset, and costs a
   Isaac published 3600 rays against Gazebo's 360 while this repository carried
   its own hand-rolled simulator. The imported package ships a real LDS scan
   pattern (`models/lidar_configs/turtlebot3_lds.json`) and publishes 360.
-- **`backend:=real` is unverified.** No robot has been on the bench. The launch
-  file mirrors `turtlebot3_bringup/launch/robot.launch.py` minus the state
-  publisher, which is shared.
+- **`backend:=real` is verified only as far as Nav2's costmaps.** A goal has
+  never been driven on hardware, and localisation on a real map is untested —
+  no world in the registry corresponds to the room the robot is in, so
+  `scripts/clone_world.py` is the next step. The drivers-local path
+  (`robot:=local`) still has no hardware behind it.
+- **The real backend's URDF is the robot's, not this repository's.** Under
+  `robot:=remote` the robot's own `turtlebot3_description` publishes
+  `/robot_description` and `/tf_static`, so the "one URDF above
+  `base_footprint`" property holds between `gazebo` and `isaacsim` but not
+  across to `real`. Deliberate, 2026-09-16; the alternative was to stop the
+  robot publishing it and push this repository's URDF from the workstation.
 - **Nav2 comes up on both simulated backends; a goal has not been driven since
   the restructure.** Localisation is verified (`map->odom` at the spawn pose on
   both) and every lifecycle node is active, but the last recorded drive-to-goal

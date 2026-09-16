@@ -62,6 +62,19 @@ def setup(context, *args, **kwargs):
     use_sim_time = 'false' if backend == 'real' else 'true'
     simulated = backend != 'real'
 
+    # `robot:=remote`: the robot is a second computer on the network running
+    # its own turtlebot3_bringup, which already publishes /scan, /odom, the
+    # URDF and tf. This machine then contributes only the consumer half. A
+    # robot_state_publisher started here would fight the robot's over
+    # /tf_static and /robot_description, and the drivers would go looking for
+    # USB devices attached to the other machine. If the two are on different
+    # subnets, discovery needs help as well: docs/network.md.
+    remote = LaunchConfiguration('robot').perform(context) == 'remote'
+    if remote and simulated:
+        raise RuntimeError(
+            'robot:=remote describes a real robot reached over the network; '
+            f'it cannot be combined with backend:={backend}.')
+
     world = worlds.World.load(LaunchConfiguration('world').perform(context))
 
     def inc(rel, **extra):
@@ -96,9 +109,10 @@ def setup(context, *args, **kwargs):
         if backend == 'isaacsim':
             backend_args['world_z'] = f'{world.isaac_world_z():g}'
 
-    actions = [
-        # Same URDF drives the kinematic tree in all three worlds. Each backend
-        # only has to supply odom->base_footprint plus sensor topics.
+    # Same URDF drives the kinematic tree in all three worlds. Each backend
+    # only has to supply odom->base_footprint plus sensor topics. Both halves
+    # sit on the robot itself when it is remote.
+    actions = [] if remote else [
         inc('common/state_publisher.launch.py'),
         inc(f'backends/{backend}.launch.py', **backend_args),
     ]
@@ -152,6 +166,12 @@ def generate_launch_description():
             description='Environment: a registry name (worlds/<name>/) or a '
                         'path to a world directory. backend:=real uses it for '
                         'the map only.'),
+        DeclareLaunchArgument(
+            'robot', default_value='local',
+            description='local: this machine runs the robot drivers and the '
+                        'state publisher. remote: the robot is another '
+                        'computer running its own turtlebot3_bringup and this '
+                        'machine runs only Nav2 (backend:=real only).'),
         DeclareLaunchArgument(
             'nav', default_value='true',
             description='Also start the Nav2 stack'),

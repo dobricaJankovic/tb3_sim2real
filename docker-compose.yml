@@ -58,6 +58,24 @@ services:
       - LDS_MODEL=${LDS_MODEL:-LDS-02}
       - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 
+      # Cross-subnet DDS. Discovery is multicast and no router forwards it, so
+      # a robot on another subnet stays invisible however correct
+      # ROS_DOMAIN_ID is -- silently, with no error on either side. Listing its
+      # address here makes it an explicit unicast discovery target;
+      # /entrypoint.sh writes the Fast DDS profile from it. Put the value in
+      # .env, which is gitignored: it is a DHCP lease, site data rather than
+      # repository data. Unset is the ordinary case and leaves Fast DDS stock,
+      # so nothing changes for a simulator-only run. Why: docs/network.md
+      - TB3_DDS_PEERS=${TB3_DDS_PEERS:-}
+      # Named here and not left to the entrypoint's own default because
+      # `docker compose exec` does not run the entrypoint (see the header): an
+      # exec shell would otherwise have the generated file on disk and no
+      # variable pointing at it, which fails the same silent way. Both
+      # spellings -- Fast DDS renamed the variable after Humble shipped, and
+      # reads whichever it finds.
+      - FASTRTPS_DEFAULT_PROFILES_FILE=/tmp/fastdds_peers.xml
+      - FASTDDS_DEFAULT_PROFILES_FILE=/tmp/fastdds_peers.xml
+
       # Deliberately no ROS_DISTRO or bundled-library path here: ros-isolate
       # derives both from ISAACSIM_ROS_DISTRO=humble (baked into the base image)
       # for the Kit process only, so the shell keeps the system Humble and Kit
