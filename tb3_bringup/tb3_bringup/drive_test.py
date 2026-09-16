@@ -309,7 +309,14 @@ class DriveTest(Node):
         dt = b['t'] - a['t']
         dx, dy = b['x'] - a['x'], b['y'] - a['y']
         d = math.hypot(dx, dy)
-        d_yaw = math.atan2(math.sin(b['yaw'] - a['yaw']), math.cos(b['yaw'] - a['yaw']))
+        # Accumulated, not end-minus-start: 5 s at 1.0 rad/s is 5 rad, and
+        # differencing two yaws that each live in [-pi, pi] reports that as
+        # -1.28. Every phase above 0.63 rad/s is more than half a turn, so the
+        # wrapped form silently destroys exactly the high-rate rows of the
+        # acceptance matrix. Summed per sample it is unbounded and correct.
+        d_yaw = sum(math.atan2(math.sin(q['yaw'] - p['yaw']),
+                               math.cos(q['yaw'] - p['yaw']))
+                    for p, q in zip(phase, phase[1:]))
         # Path length, not displacement: an arc's chord understates how far the
         # wheels actually turned, and for a pure rotation the displacement is
         # ~0 while any nonzero path length is slip or noise.
@@ -378,8 +385,12 @@ class DriveTest(Node):
             out['truth_d'] = round(math.hypot(b2['gx'] - a2['gx'],
                                               b2['gy'] - a2['gy']), 5)
             out['truth_d_yaw'] = round(
-                math.atan2(math.sin(b2['gyaw'] - a2['gyaw']),
-                           math.cos(b2['gyaw'] - a2['gyaw'])), 5)
+                sum(math.atan2(math.sin(q['gyaw'] - p['gyaw']),
+                               math.cos(q['gyaw'] - p['gyaw']))
+                    for p, q in zip(truth, truth[1:])), 5)
+            out['truth_path_len'] = round(
+                sum(math.hypot(q['gx'] - p['gx'], q['gy'] - p['gy'])
+                    for p, q in zip(truth, truth[1:])), 5)
         return out
 
 
