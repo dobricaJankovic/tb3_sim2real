@@ -68,8 +68,23 @@ offset that could be tolerated — it is large at boot and steps
 discontinuously, and a step mid-run invalidates tf caches on both sides.
 
 **To do:** chrony on both, the Pi syncing to the workstation so the two agree
-even when the campus network does not. Verify with `chronyc tracking`, or
-`date +%s.%N` on both. Do this before trusting any real-robot measurement.
+even when the campus network does not. Do this before trusting any real-robot
+measurement.
+
+Shape of it, not a tested recipe: `chrony` on both machines; on the workstation
+an `allow` line for the robot's subnet so it will answer time requests; on the
+Pi a `server <workstation-ip> iburst` line. What matters more than the exact
+config is the checking — `chronyc tracking` on the Pi should name the
+workstation as its source and report an offset in milliseconds, and
+`date +%s.%N` run on both should agree. `chronyc makestep` forces an immediate
+correction rather than waiting for chrony to slew, which is what you want after
+a boot rather than mid-run.
+
+Two things to be careful about. The offset right after the Pi boots is the
+interesting one, since that is when experiments start — check it then, not
+after the machine has been up an hour. And a correction applied *during* a run
+is worse than a constant offset, because it invalidates tf caches on both
+sides; let the clock settle before launching anything.
 
 ## 3. `slam:=true`, on every backend
 
