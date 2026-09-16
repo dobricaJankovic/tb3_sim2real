@@ -1,0 +1,25 @@
+{
+ "label": "2026-09-17_scan_gazebo",
+ "world": "small_office",
+ "scans_averaged": 20,
+ "beams": 360,
+ "angle_min": 0.0,
+ "angle_increment": 0.017493,
+ "range_min": 0.11999999731779099,
+ "range_max": 3.5,
+ "sensor_xy": [
+  -1.532,
+  -1.5
+ ],
+ "valid_return_fraction": 0.8056,
+ "wall_error_m": {
+  "n": 234,
+  "mean": 0.00052,
+  "sd": 0.00236,
+  "max_abs": 0.00607
+ },
+ "prop_returns": 56,
+ "leaks": 0,
+ "leak_examples": [],
+ "noise_spread_mean": 0.02991
+}

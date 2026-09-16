@@ -530,3 +530,228 @@ loop, and a controller both suppresses plant noise and adds its own, so the
 variance of a navigation metric has to be measured rather than inherited from
 here. The right reading of this table is "expect to need ~10, measure it".
 
+## 11. A7 — the perception layer, against the manifest's own geometry
+
+`ros2 run tb3_bringup scan_test`, new tonight. The robot is parked at the
+manifest spawn in `small_office` and never commanded, so nothing here is
+confounded by §9's actuation residual. The expected range down every beam is
+**ray-cast from `worlds/small_office/world.yaml`** — the same file both
+simulators were generated from — so there is no reference scan and no
+hand-measured room.
+
+The room is five boxes and the props are seven meshes. Only the boxes are
+ray-cast, which is the method rather than a limitation: a prop can only ever
+*occlude* a wall, so the box-only prediction is an upper bound and each beam
+sorts itself without anyone modelling a chair.
+
+| | **gazebo** |
+|---|---|
+| beams crossing the scan plane | 5 boxes |
+| valid return fraction | 0.8056 |
+| **wall range error vs analytic** | **mean +0.00052 m, sd 0.00236 m, max 0.00607 m** (n = 234) |
+| prop returns (shorter than the wall behind) | 56 |
+| **leaks** (a beam passing through a wall) | **0** |
+
+**Gazebo's lidar reproduces the manifest to half a millimetre of mean error and
+2.4 mm of spread**, against an LDS-01 spec of ±15 mm. Zero leaks, so the
+generated SDF geometry is where the manifest says it is, to the sensor's
+ability to tell.
+
+The 19% of beams with no return are the far corners of a 6 × 5 m room seen from
+(−1.5, −1.5) with a 3.5 m maximum range — geometry, not a fault, and measured
+identically on both backends.
+
+**This is the near-null the four-layer table predicted for perception**, and it
+is what licenses the claim that the gap lives in actuation: the same apparatus
+that finds a 30% actuation error finds a 0.5 mm perception error.
+
+### Isaac Sim, same pose, same analytic reference
+
+| | gazebo | **isaacsim** |
+|---|---|---|
+| valid return fraction | 0.8056 | 0.8250 |
+| wall range error, mean | +0.00052 m | +0.00085 m |
+| wall range error, sd | **0.00236 m** | **0.01509 m** |
+| max abs error | 0.00607 m | 0.04691 m |
+| prop returns | 56 | 68 |
+| leaks | **0** | **9** |
+
+Two differences, and the second one is a real defect.
+
+**Isaac's lidar is 6.4x noisier — and that is correct.** An sd of 15.1 mm is
+the LDS-01's own ±15 mm specification; `turtlebot3_isaacsim` models the sensor's
+noise and the Gazebo plugin, as configured, essentially does not. Neither has a
+range *bias*: both means are under a millimetre.
+
+**Isaac's scan is rotated by half a degree.** The 9 leaks are not holes in a
+wall: they are one contiguous run of beams, indices 154–162, all against
+`wall_south` at grazing incidence, each reading 5–7 cm long. At grazing
+incidence `dr/dθ` is about 4.9 m/rad, so a fraction of a degree of misalignment
+becomes centimetres of range error there and is invisible everywhere else.
+
+Fitting the angular offset that minimises the wall residual, over every wall
+beam:
+
+| | best-fit offset | residual rms |
+|---|---|---|
+| gazebo | **+0.0000 rad (+0.000°)** | 0.00242 m |
+| isaacsim | **+0.0095 rad (+0.544°)** | 0.00608 m, down from 0.01509 |
+
+Gazebo's scan is aligned exactly. Isaac's is off by **0.544°, which is 0.54 of
+one 1.0° beam** — close enough to half a bin to suggest a beam-indexing
+convention difference (range reported at the edge of an azimuth sector rather
+than its centre) rather than a physical mounting error. Removing it cuts the
+residual by 2.5x and accounts for every leak.
+
+**This is exactly the class of error the repository exists to catch** — F6
+warned about "a silent few-centimetre lidar offset", and this is its angular
+twin. It is small, it is systematic, it biases every scan match slightly, and
+nothing else would have found it: it is only visible against an analytic ground
+truth, which only exists because the world is generated from a manifest.
+
+Cause not established — half a beam is a strong hint, not a diagnosis. Next
+test in §13.
+
+## 12. A8 — `nav_test`, built and run
+
+New tonight: `ros2 run tb3_bringup nav_test`. Sends `NavigateToPose` goals from
+a per-world fixed list and records, per goal: status, time on the simulator's
+clock, path length against straight-line distance, final position and heading
+error from `map -> base_footprint`, recovery-behaviour count, and closest
+approach to an obstacle — with a rosbag alongside so a metric nobody thought of
+tonight can be derived without re-running the matrix. One instrument, all
+backends, and one `nav2_params.yaml`, per F7.
+
+`world:=turtlebot3_world`, `nav:=true`, AMCL seeded at the manifest spawn.
+
+| goal | | gazebo | isaacsim @ 480 Hz |
+|---|---|---|---|
+| `far_corner` | time / pos err / yaw err | 22.10 s / 0.2269 m / 0.0372 rad | 22.45 s / 0.2455 m / 0.0514 rad |
+| `spin_in_place` (yaw + π) | | 8.60 s / 0.0565 m / 0.1823 rad | 11.25 s / 0.0476 m / 0.2380 rad |
+| `back_home` | | 27.90 s / 0.0270 m / 0.2012 rad | 29.82 s / 0.0146 m / 0.2326 rad |
+| recoveries | | 0 / 0 / 0 | 0 / 0 / 0 |
+| closest approach | | 0.345 / 0.397 / 0.356 m | 0.400 / 0.452 / 0.400 m |
+
+Both backends complete every goal with no recovery behaviour. Times are within
+1.6% on the translation goals and 31% apart on the pure rotation
+(8.60 s vs 11.25 s) — the one goal that exercises the axis with the remaining
+deficit, and the direction is what §9 predicts.
+
+**One run each, so per §10 this resolves differences of roughly 5% and up. The
+31% rotation gap is comfortably outside that; the 1.6% translation difference
+is not, and must not be read as a difference at all.**
+
+### What is missing from A8, and why
+
+The before/after navigation comparison on Isaac Sim — the same matrix at 60 Hz —
+**was not obtained.** Two attempts, both lost to a container-level failure
+rather than anything about the physics:
+
+1. First attempt: `map_server` started but never advertised
+   `map_server/get_state`, so `lifecycle_manager_localization` waited forever
+   and the run never began. Nav2's own processes were alive; discovery was not.
+2. Second attempt, after killing every stale process: Isaac Sim reached
+   `isaacsim.ros2.bridge` startup and stopped advancing, and `ros2 topic list`
+   returned nothing at all.
+
+The container had by then been through roughly twenty simulator launches.
+`docker compose restart tb3_ros` cleared it, and the very next Isaac run
+(`scan_test`, §11) came up in 16 s. **The signature is accumulated DDS or
+shared-memory state, not the 60 Hz setting**, and it is worth knowing about
+because it presents as a hung simulator.
+
+Rerunning it needs the `physics_hz` plumbing in §13 and about ten minutes.
+
+## 13. What is known, what is not, and what to do next
+
+### Settled
+
+| | |
+|---|---|
+| **H1** drive is damping-limited | **DEAD.** `D` 1e3 → 1e7 (10,000x), error 0.288 → 0.332 rad/s. `err*D` spans 76 to 3.6e6 N·m. |
+| **H2** torque saturation | **DEAD.** Runtime max effort is FLT_MAX; no `maxForce` authored. |
+| **H0** the OmniGraph emits a wrong command | **DEAD.** Deficit reproduces with ROS, the DifferentialController and the ArticulationController all bypassed. |
+| **H4** odometry bug | **DEAD.** Visible in the articulation's own joint velocities; and Isaac's `/odom` is the chassis prim, so it cannot drift from the body. |
+| **H6** sleep / stabilisation threshold | **DEAD.** Disabling both changes nothing (25.3 → 28.6%, inside the scatter). |
+| **F3** the mujoco variant is live | **FALSE.** Stage composes `Physics = "physx"`; no `MjcActuator` prims exist. The degree-converted gain in `mujoco.usda` is latent, and the physx path's deg→rad conversion is correct (1745.3292 → exactly 1e5). |
+| **H3 / H5** contact, and how it is solved | **SUPPORTED.** Off the ground the error is exactly 0.0000; on the ground it falls monotonically with sub-step rate. |
+
+### Not settled
+
+1. **Why the differential mode is so much worse than the common mode.** Yaw is
+   the softer degree of freedom, but the obvious cause is excluded: taking the
+   caster's friction to 0 leaves the differential error unchanged (0.3482 →
+   0.3325) while it does help common mode (0.0833 → 0.0069).
+   **Next test:** the wheel colliders are `Cylinder` prims, and neither PhysX
+   nor MuJoCo has a true rolling cylinder — both approximate one. Re-run the
+   `FREE`/ground pair with the wheels replaced by spheres of the same radius.
+   If the differential error collapses, it is cylinder contact generation, and
+   the fix belongs in `import_turtlebot3.py` as a collider approximation rather
+   than in the timestep.
+2. **Why the residual scatters so much at `wz = 0.2`** — 25.3, 28.6, 49.9, 3.4
+   and 13.1% at one fixed setting. **Next test:** hold each rate for 30 s rather
+   than 2.5 s and repeat 5x; decide whether the mean is converging slowly or the
+   process is genuinely non-stationary.
+3. **The 0.544° lidar rotation** (§11). **Next test:** command a known yaw, or
+   simply park at several yaws, and check whether the offset is constant in the
+   sensor frame (an indexing convention) or varies with heading (a mounting or
+   tf error). Then read `horizontalResolution` and the azimuth-to-index mapping
+   in `turtlebot3_isaacsim`'s lidar profile against `models/lidar_configs/turtlebot3_lds.json`.
+4. **Whether 480 Hz is the right price.** RTF 0.68 is comfortable, but 240 Hz
+   (RTF would be higher) already fixes translation completely and gets rotation
+   to 8.7%. If rotation is fixed properly by (1), the rate could come back down.
+
+### Recommended next steps, in order
+
+1. **The sphere-collider test.** It is 40 minutes and it is the difference
+   between "we damped the symptom with a finer timestep" and "we found the
+   cause". Everything else on this list is smaller.
+2. **Plumb `physics_hz` from the top.** `tb3_bringup/launch/backends/isaacsim.launch.py`
+   forwards seven arguments and not this one, so tonight's A/B was done by
+   editing a default in the imported package and putting it back — which is
+   exactly the kind of thing that silently does not get put back. One
+   `DeclareLaunchArgument` in the backend file; **it needs no change to
+   `bringup.launch.py`**, which lane C is rewriting.
+3. **Rerun A8's before/after** once (2) exists, with 10 runs per cell per §10.
+4. **Fix `measurements/isaac_angular_deficit.md`.** Its conclusion ("the drive
+   gain is too low for the wheel friction") is now known to be wrong, and it is
+   the document a reader would find first. It should keep its measurements —
+   they are correct and they reproduce — and say what they actually meant.
+   Likewise `docs/status.md`'s "Isaac Sim currently under-rotates … It is a
+   wheel-drive gain" and the same claim in `CLAUDE.md`.
+5. **Consider a robot-level equivalent of `check_worlds.py`** (§4). The world is
+   identical across backends by construction and the *robot* is not: wheel
+   friction is 1e5 in Gazebo and 1.0 in Isaac Sim, and nothing compares them.
+
+### Things a reader should not conclude from this report
+
+- **Not** that Isaac Sim is fixed. Translation meets the 1% target; rotation
+  does not, and the low-rate pivot — Nav2's final-alignment regime — is still
+  the worst case at 80% of commanded yaw.
+- **Not** that Gazebo is the accurate one. It is *exact*, which is different:
+  an ideal velocity source with `mu = 1e5` wheels cannot lag and cannot slip.
+  Neither simulator's actuator resembles a real one; they fail in opposite
+  directions.
+- **Not** that the gain in `import_turtlebot3.py` is correct. It is *unverified
+  and irrelevant* — four decades of it change nothing measurable.
+
+## 14. Gates and housekeeping
+
+- `scripts/check_worlds.py` **before**: 3/3 worlds consistent.
+- `scripts/check_worlds.py` **after**: 3/3 worlds consistent. No world artifact
+  was regenerated and nothing under `worlds/`, `measurements/` or `maps/` was
+  deleted.
+- No `git push`, no force operations, no amends. All commits local, on
+  `overnight/2026-09-16`, plus two in `src/turtlebot3_isaacsim` (its own repo,
+  also local).
+- `src/turtlebot3_isaacsim` was modified by lane B during the session. The
+  burger asset's SHA-256 was unchanged throughout, so every drive measurement
+  here is against one asset. Lane B's `SCAN_OFFSET` fix touched waffle only.
+- One `drive_test` run was discarded: a simulator survived teardown and two
+  robots published `/odom` on two clocks. The harness now refuses to start
+  beside a live publisher, and `drive_test`'s samples carry a
+  backwards-time check that catches it after the fact.
+
+### For the morning, to run by hand
+
+Nothing needs a remote. The only commands worth running are the ones in §13.

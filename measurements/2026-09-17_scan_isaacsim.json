@@ -1,0 +1,76 @@
+{
+ "label": "2026-09-17_scan_isaacsim",
+ "world": "small_office",
+ "scans_averaged": 20,
+ "beams": 360,
+ "angle_min": -3.14159,
+ "angle_increment": 0.017453,
+ "range_min": 0.11999999731779099,
+ "range_max": 3.5,
+ "sensor_xy": [
+  -1.532,
+  -1.5
+ ],
+ "valid_return_fraction": 0.825,
+ "wall_error_m": {
+  "n": 220,
+  "mean": 0.00085,
+  "sd": 0.01509,
+  "max_abs": 0.04691
+ },
+ "prop_returns": 68,
+ "leaks": 9,
+ "leak_examples": [
+  {
+   "i": 154,
+   "angle": -0.45379,
+   "predicted": 2.28117,
+   "measured": 2.33317,
+   "hits": "wall_south",
+   "spread": 0.11256,
+   "returns": 16,
+   "error": 0.052
+  },
+  {
+   "i": 155,
+   "angle": -0.43633,
+   "predicted": 2.3662,
+   "measured": 2.43039,
+   "hits": "wall_south",
+   "spread": 0.12451,
+   "returns": 16,
+   "error": 0.06419
+  },
+  {
+   "i": 156,
+   "angle": -0.41888,
+   "predicted": 2.45859,
+   "measured": 2.5251,
+   "hits": "wall_south",
+   "spread": 0.17247,
+   "returns": 17,
+   "error": 0.06651
+  },
+  {
+   "i": 157,
+   "angle": -0.40143,
+   "predicted": 2.5593,
+   "measured": 2.62531,
+   "hits": "wall_south",
+   "spread": 0.16375,
+   "returns": 14,
+   "error": 0.066
+  },
+  {
+   "i": 158,
+   "angle": -0.38397,
+   "predicted": 2.66947,
+   "measured": 2.74087,
+   "hits": "wall_south",
+   "spread": 0.15567,
+   "returns": 18,
+   "error": 0.07141
+  }
+ ],
+ "noise_spread_mean": 0.05584
+}

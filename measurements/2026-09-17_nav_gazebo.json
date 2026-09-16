@@ -1,0 +1,88 @@
+{
+ "label": "2026-09-17_nav_gazebo",
+ "world": "turtlebot3_world",
+ "sim_time": true,
+ "goals": [
+  {
+   "goal": "far_corner",
+   "status": "SUCCEEDED",
+   "target": [
+    2.0,
+    0.5,
+    0.0
+   ],
+   "elapsed_s": 22.1,
+   "recoveries": 0,
+   "odom_path_m": 4.6124,
+   "min_obstacle_m": 0.3451,
+   "final": [
+    1.7745,
+    0.475,
+    0.0372
+   ],
+   "goal_err_m": 0.2269,
+   "yaw_err_rad": 0.0372,
+   "straight_line_m": 3.8581,
+   "path_ratio": 1.1955,
+   "truth": [
+    1.8293,
+    0.5916,
+    0.0829
+   ]
+  },
+  {
+   "goal": "spin_in_place",
+   "status": "SUCCEEDED",
+   "target": [
+    2.0,
+    0.5,
+    3.1416
+   ],
+   "elapsed_s": 8.6,
+   "recoveries": 0,
+   "odom_path_m": 0.3869,
+   "min_obstacle_m": 0.3971,
+   "final": [
+    2.0544,
+    0.4846,
+    -2.9593
+   ],
+   "goal_err_m": 0.0565,
+   "yaw_err_rad": 0.1823,
+   "straight_line_m": 0.2801,
+   "path_ratio": 1.3816,
+   "truth": [
+    2.0664,
+    0.515,
+    -2.9791
+   ]
+  },
+  {
+   "goal": "back_home",
+   "status": "SUCCEEDED",
+   "target": [
+    -2.0,
+    -0.5,
+    0.0
+   ],
+   "elapsed_s": 27.9,
+   "recoveries": 0,
+   "odom_path_m": 4.7711,
+   "min_obstacle_m": 0.356,
+   "final": [
+    -1.9984,
+    -0.473,
+    -0.2012
+   ],
+   "goal_err_m": 0.027,
+   "yaw_err_rad": 0.2012,
+   "straight_line_m": 4.1644,
+   "path_ratio": 1.1457,
+   "truth": [
+    -2.0513,
+    -0.4287,
+    -0.2185
+   ]
+  }
+ ]
+}
