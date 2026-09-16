@@ -1,4 +1,4 @@
-# Nav2 parameters, shared by all three backends.
+# Nav2 parameters, shared by all three backends, unconditionally.
 #
 # Verbatim ros-humble-turtlebot3-navigation2's param/humble/burger.yaml -- the
 # Humble-specific variant, not the newer one beside it -- so that a run here is
@@ -6,11 +6,12 @@
 # backend by nav2_bringup's own RewrittenYaml, from the value bringup.launch.py
 # derives from `backend:=`; do not set it by hand.
 #
-# WHEN THE BACKENDS NEED DIFFERENT TUNING, add config/nav2_<backend>.yaml with
-# the whole parameter set and bringup.launch.py will prefer it over this file.
-# Until then there is deliberately one copy: three identical files that must be
-# kept in step are a worse record of "the backends do not differ yet" than one
-# file is, and the delta between them is only interesting once it is real.
+# DO NOT ADD A PER-BACKEND VARIANT. bringup.launch.py used to auto-prefer
+# config/nav2_<backend>.yaml if one appeared; that mechanism was removed
+# 2026-09-16 because it made per-backend tuning convenient, and per-backend
+# tuning absorbs the sim-to-real gap this repository exists to measure into
+# the tuning instead. One params file for all three backends is a
+# methodological requirement, not a placeholder for the day it becomes three.
 
 amcl:
   ros__parameters:

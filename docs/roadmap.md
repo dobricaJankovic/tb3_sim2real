@@ -165,8 +165,8 @@ map that is still being drawn:
 
 |  | `nav:=false` | `nav:=true` |
 |---|---|---|
-| `slam:=false` | robot only; teleop | `map_server` + AMCL + Nav2 |
-| `slam:=true`  | slam_toolbox + teleop | Nav2 while mapping |
+| `slam:=false` | robot only | `map_server` + AMCL + Nav2 |
+| `slam:=true`  | slam_toolbox + Nav2 | Nav2 while mapping |
 
 Both default false, and the dispatch in `bringup.launch.py` is flat — no
 combination is rejected and neither flag is phrased as the absence of the
@@ -182,6 +182,20 @@ and no composable node is ever loaded into it.
 `backend:=real` with neither flag no longer errors. It starts RViz, which is
 the one useful thing the workstation can do with no stack selected, and is also
 how you see in one second that a robot publishing `/scan` has no `odom` frame.
+
+**Collapsed to three modes, 2026-09-16.** Two problems with the grid above.
+First, two cells named a "teleop" that no launch file in this repository ever
+started — `grep -rn teleop` finds prose, not a launch file. Second,
+`slam:=true` with `nav:=false` was a real, distinct mode: SLAM with no
+planner running against it, thinly useful and one more combination to reason
+about. `bringup.launch.py` now folds it in: `slam:=true` runs Nav2
+unconditionally, so it and `slam:=true nav:=true` are now the same mode rather
+than two — `nav:=true` alongside `slam:=true` changes nothing, and is accepted
+rather than rejected. Three modes result: bare robot (neither flag), `nav:=true`
+(saved map), `slam:=true` (Nav2 while mapping). To drive without Nav2, run
+`ros2 run turtlebot3_teleop teleop_keyboard` or `ros2 run tb3_bringup
+drive_test` in a second terminal; that is named in `README.md` now instead of
+implied by a mode that did not exist.
 
 **SLAM is allowed on the simulated backends too**, against the instinct that it
 only makes sense on hardware. Three maps of one room are then available:
@@ -224,7 +238,7 @@ map passed on the command line is a map that drifts away from the world it
 describes. `world:=` is required, and its map is `worlds/<name>/map/` or it has
 not been made yet — which is what `slam:=true` is for.
 
-**Decided: the map is saved into `worlds/<name>/map.yaml`, never to
+**Decided: the map is saved into `worlds/<name>/map/<name>.yaml`, never to
 `map_saver_cli`'s default.** A map that lands in the working directory is a map
 that drifts away from the world it describes, which is the failure the registry
 exists to prevent. `map_saver_cli` is manual by nature, so this wants a thin
@@ -295,11 +309,18 @@ an x86 SBC or a Jetson goes on the robot.
 
 **Built.** The `robot` argument is gone; `backends/real.launch.py` is deleted
 rather than left unreferenced, because an unreferenced backend file is exactly
-the thing that goes stale. Its one piece of hard-won knowledge — that
-`turtlebot3_node` declares `namespace` as a statically typed parameter with no
-default and aborts before opening the serial port without it — is preserved in
-the comment in `bringup.launch.py` that records how to bring the tethered path
-back: include upstream's `robot.launch.py`, do not re-derive it.
+the thing that goes stale.
+
+The tethered alternative — OpenCR and lidar on the workstation's own USB, so
+the robot layer runs there too — is deliberately not an argument, because a
+robot that drives cannot be tethered. It comes back the day an x86 SBC or a
+Jetson goes on the robot, and the way back is to include upstream's
+`turtlebot3_bringup/launch/robot.launch.py` rather than to re-derive it. One
+thing that costs an hour if it is re-derived: `turtlebot3_node` declares
+`namespace` as a statically typed parameter with no default, so it must be
+passed as a PARAMETER and not merely as a frame prefix, or the process aborts
+before it opens the serial port with `Statically typed parameter 'namespace'
+must be initialized`.
 
 One consequence, and it is the reason section 3's error was worth writing now:
 `backend:=real` contributes no local processes, so `backend:=real nav:=false`
@@ -325,7 +346,7 @@ is inert rather than an error.
    been made end-to-end and `save_map.py` has only been exercised against its
    guards.
 5. **Author the lab world** (USD + SDF + manifest, not cloned), and save its
-   SLAM map into `worlds/<name>/map.yaml`.
+   SLAM map into `worlds/<name>/map/<name>.yaml`.
 6. **The first real drive-to-goal**, which is still unrecorded — then the
    three-map comparison from section 3.
 

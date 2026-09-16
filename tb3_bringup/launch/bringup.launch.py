@@ -5,47 +5,32 @@
     ros2 launch tb3_bringup bringup.launch.py backend:=real     world:=lab_room
     ros2 launch tb3_bringup bringup.launch.py backend:=gazebo   world:=/path/to/my_office
 
-Both arguments are required. Neither has a sensible default: `backend` names
-the machine and `world` names the room, and guessing either produces a run that
-looks fine and means nothing.
+`backend:=` and `world:=` are both required and have no default: `backend`
+names the machine and `world` names the room, and guessing either produces a
+run that looks fine and means nothing. `backend:=` picks who supplies the
+robot layer (drivers, odometry, `robot_state_publisher`) and derives
+`use_sim_time` so it is never set by hand; `world:=` picks the environment,
+resolved through `tb3_bringup.worlds` so every backend agrees on the start
+pose and the map. The two-layer split, why `backend:=real` contributes no
+local processes here, and why `world:=` means the same thing on every backend
+are written up in `docs/architecture.md`; this file only implements them.
 
-A run is two layers, the way ROS already splits them:
+The workstation layer is three modes:
 
-  robot layer        drivers, odometry, robot_state_publisher. Supplied by a
-                     simulator, or by the hardware itself.
-  workstation layer  map server, localization, Nav2, RViz. Identical
-                     everywhere; it does not know which robot it is driving.
+    (neither)    robot + RViz. Drive it, run drive_test, attach your own stack.
+    nav:=true    map_server + AMCL + Nav2, on the world's saved map.
+                 No map -> error naming the fix: run slam:=true, then
+                 scripts/save_map.py <world>
+    slam:=true   slam_toolbox + Nav2. Navigate while building the map.
 
-`backend:=` answers exactly one question — who provides the robot layer.
-`gazebo` and `isaacsim` start it here; `real` starts nothing here, because the
-robot is a second computer already running its own turtlebot3_bringup. That is
-why this file contributes no local processes for `backend:=real`: correct, not
-broken.
+`nav:=true` navigates on a saved map; `slam:=true` navigates while making one;
+neither gives you a bare robot. `slam:=true` already runs Nav2, so `slam:=true
+nav:=true` is accepted rather than rejected — it means the same thing. To
+drive manually instead of running Nav2, use a second terminal: `ros2 run
+turtlebot3_teleop teleop_keyboard` or `ros2 run tb3_bringup drive_test`.
 
-`world:=` names the ENVIRONMENT, not a file, and means the same thing
-everywhere: the backend picks up whichever representation of it applies —
-gzserver loads its .world, Kit opens its .usd, and the real robot loads nothing
-because the environment is already around it. All three take the robot's start
-pose and the Nav2 map from the same manifest, which is what makes a run on one
-backend comparable with a run on another.
-
-The workstation layer is two independent questions, not one three-way choice:
-
-                 nav:=false                  nav:=true
-  slam:=false    robot only; teleop          map_server + AMCL + Nav2
-  slam:=true     slam_toolbox + teleop       Nav2 while mapping
-
-`slam` answers *where does map->odom come from* — slam_toolbox builds the map
-and publishes the transform, or map_server and AMCL use one built earlier.
-`nav` answers *does the navigation stack run*. Neither excludes the other, so
-no combination has to be rejected, and `slam:=true nav:=true` is a real mode:
-Nav2 plans over a map that slam_toolbox is still drawing.
-
-Both default false. `world:=` is required and `map:=` does not exist — the map
-is `worlds/<name>/map.yaml` or it has not been made yet, and `slam:=true` is
-how it gets made. A map passed on the command line is a map that drifts away
-from the world it describes, which is the failure the registry exists to
-prevent.
+There is no `map:=` — a map lives in `worlds/<name>/map/` or it has not been
+made yet, and `slam:=true` is how it gets made.
 
 OpaqueFunction rather than IfCondition, so the backend argument is a plain
 Python string we can branch on. That also lets us derive use_sim_time from the
@@ -69,19 +54,6 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 from tb3_bringup import worlds
-
-
-def params_file(pkg, backend):
-    """config/nav2_<backend>.yaml if it exists, else the shared one.
-
-    The backends need identical Nav2 structure and, eventually, different
-    tuning; the delta between them is a measurement of the sim-to-real gap. A
-    per-backend file therefore wins as soon as someone writes one, and until
-    then there is one copy rather than three that drift.
-    """
-    specific = os.path.join(pkg, 'config', f'nav2_{backend}.yaml')
-    return specific if os.path.isfile(specific) else os.path.join(
-        pkg, 'config', 'nav2_params.yaml')
 
 
 def setup(context, *args, **kwargs):
@@ -125,18 +97,10 @@ def setup(context, *args, **kwargs):
         return os.path.join(pkg, 'launch', rel)
 
     def nav2(rel):
-        # nav2_bringup's own launch files, included directly rather than
-        # through its bringup_launch.py. That wrapper exists to make `slam`
-        # choose between slam_launch.py and localization_launch.py with an
-        # `IfCondition(['not ', slam])`; here the two questions are
-        # independent, so the wrapper has nothing left to do.
-        #
-        # One consequence: localization_launch.py and navigation_launch.py
-        # default `use_composition` to False, where bringup_launch.py defaults
-        # it True and creates the shared `nav2_container` itself. So Nav2's
-        # nodes now run as separate processes. Slightly more overhead, and it
-        # retires the failure mode in docs/network.md where the container
-        # starts and no composable node is ever loaded into it.
+        # nav2_bringup's own launch files, included directly rather than through
+        # bringup_launch.py: `slam` and `nav` are independent questions here, so
+        # that wrapper's whole job — an IfCondition switching between the two —
+        # has nothing left to do. See docs/architecture.md.
         return os.path.join(nav2_launch_dir, rel)
 
     x, y, z, yaw = world.spawn
@@ -154,25 +118,9 @@ def setup(context, *args, **kwargs):
 
     # The robot layer. Same URDF drives the kinematic tree in both simulated
     # worlds; each backend only has to supply odom->base_footprint plus sensor
-    # topics on top of it.
-    #
-    # backend:=real supplies neither from here. The robot runs its own
-    # turtlebot3_bringup and already publishes /scan, /odom, the URDF and tf; a
-    # robot_state_publisher started here would fight the robot's over
-    # /tf_static and /robot_description, and drivers started here would go
-    # looking for USB devices attached to the other machine. If the two are on
-    # different subnets, discovery needs help as well: docs/network.md.
-    #
-    # The tethered alternative — OpenCR and lidar on this machine's USB, so the
-    # robot layer runs here too — is deliberately not an argument, because a
-    # robot that drives cannot be tethered. It comes back the day an x86 SBC or
-    # a Jetson goes on the robot, and the way back is to include upstream's
-    # turtlebot3_bringup/launch/robot.launch.py rather than to re-derive it.
-    # One thing that costs an hour if it is re-derived: turtlebot3_node
-    # declares `namespace` as a statically typed parameter with no default, so
-    # it must be passed as a PARAMETER and not merely as a frame prefix, or the
-    # process aborts before it opens the serial port with
-    # `Statically typed parameter 'namespace' must be initialized`.
+    # topics on top of it. backend:=real supplies neither from here — the robot
+    # runs its own turtlebot3_bringup already; see docs/architecture.md and
+    # docs/roadmap.md for the tethered alternative this deliberately is not.
     actions = [] if backend == 'real' else [
         inc(ours('common/state_publisher.launch.py')),
         inc(ours(f'backends/{backend}.launch.py'), **backend_args),
@@ -181,13 +129,10 @@ def setup(context, *args, **kwargs):
     if LaunchConfiguration('rviz').perform(context) == 'true':
         actions.append(inc(ours('common/rviz.launch.py')))
 
-    # The workstation layer. Two independent questions; see the grid at the top
-    # of this file. The dispatch is deliberately flat — `slam` picks the source
-    # of map->odom, `nav` switches the navigation stack on, and neither is
-    # phrased as the absence of the other.
+    # The workstation layer: three modes, documented at the top of this file.
     slam = LaunchConfiguration('slam').perform(context) == 'true'
     nav = LaunchConfiguration('nav').perform(context) == 'true'
-    params = params_file(pkg, backend)
+    params = os.path.join(pkg, 'config', 'nav2_params.yaml')
 
     stack = []
     if slam:
@@ -211,7 +156,10 @@ def setup(context, *args, **kwargs):
         stack.append(inc(nav2('localization_launch.py'),
                          map=map_yaml, params_file=params))
 
-    if nav:
+    if nav or slam:
+        # Under slam:=true this runs alongside slam_toolbox rather than
+        # map_server + AMCL, which is why nav:=true adds nothing new when
+        # slam:=true is already set.
         stack.append(inc(nav2('navigation_launch.py'), params_file=params))
 
     if not stack:
@@ -246,27 +194,23 @@ def generate_launch_description():
             'backend',
             description='Which robot to bring up: real | gazebo | isaacsim'),
         DeclareLaunchArgument(
-            # Required, deliberately: no default. A world is what makes two
-            # runs comparable, so which one this is must be stated rather than
-            # inherited. A default silently attributes every unqualified run to
-            # turtlebot3_world — including a real-robot run in a room that is
-            # not turtlebot3_world, where the map is simply wrong and Nav2
-            # localises into fiction rather than failing.
+            # Required, deliberately: no default. See the module docstring and
+            # docs/architecture.md for why guessing either argument is worse
+            # than an error.
             'world',
             description='Environment: a registry name (worlds/<name>/) or a '
                         'path to a world directory. backend:=real uses it for '
                         'the map only.'),
         DeclareLaunchArgument(
             'nav', default_value='false',
-            description='Run the navigation stack: planner, controller, '
-                        'behaviours, bt_navigator. Without slam:=true it also '
-                        "runs map_server and AMCL on the world's map."),
+            description='Navigate on the world\'s saved map: map_server + '
+                        'AMCL + Nav2. Ignored if slam:=true, which already '
+                        'includes Nav2.'),
         DeclareLaunchArgument(
             'slam', default_value='false',
-            description='Build the map as you go: slam_toolbox supplies /map '
-                        'and map->odom in place of map_server and AMCL. '
-                        'Combines with nav:=true. Save the result with '
-                        'scripts/save_map.py <world>.'),
+            description='Navigate while building the map: slam_toolbox + '
+                        'Nav2 in place of map_server + AMCL. Save the result '
+                        'with scripts/save_map.py <world>.'),
         DeclareLaunchArgument(
             'rviz', default_value='true',
             description='Also start RViz'),

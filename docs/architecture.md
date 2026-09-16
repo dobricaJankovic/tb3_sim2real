@@ -139,7 +139,7 @@ tb3_bringup/
   launch/bringup.launch.py     <- single entry point, dispatches on backend
   launch/backends/             <- the only layer that varies
   launch/common/               <- state_publisher + nav2, identical everywhere
-  config/nav2_params.yaml      <- shared; nav2_<backend>.yaml wins where it exists
+  config/nav2_params.yaml      <- shared, unconditionally; see step 5 below
   tb3_bringup/worlds.py        <- the registry, read by the launch AND the generators
 ```
 
@@ -148,6 +148,47 @@ generators run under Kit's own interpreter with the system ROS 2 stripped off
 the search path, so it is plain Python and PyYAML with no ROS import. Both sides
 therefore resolve `world:=` through the same code and cannot disagree about what
 a world is.
+
+## The launch entry point
+
+`bringup.launch.py` is two layers, the way ROS already splits them:
+
+  robot layer        drivers, odometry, robot_state_publisher. Supplied by a
+                     simulator, or by the hardware itself.
+  workstation layer  map server, localization, Nav2, RViz. Identical
+                     everywhere; it does not know which robot it is driving.
+
+`backend:=` answers exactly one question — who provides the robot layer.
+`gazebo` and `isaacsim` start it in this file; `real` starts nothing here,
+because the robot is a second computer already running its own
+`turtlebot3_bringup`. That is why the file contributes no local processes for
+`backend:=real`: correct, not broken. See `docs/roadmap.md` for the tethered
+alternative this deliberately is not.
+
+`world:=` names the ENVIRONMENT, not a file, and means the same thing
+everywhere: the backend picks up whichever representation of it applies —
+gzserver loads its `.world`, Kit opens its `.usd`, and the real robot loads
+nothing because the environment is already around it. All three take the
+robot's start pose and the Nav2 map from the same manifest, which is what
+makes a run on one backend comparable with a run on another.
+
+Both `backend:=` and `world:=` are required, with no default. A default would
+silently attribute every unqualified run to one world — including a
+real-robot run in a room that is not that world, where the map is simply
+wrong and Nav2 localises into fiction rather than failing.
+
+`bringup.launch.py` includes `nav2_bringup`'s `slam_launch.py`,
+`localization_launch.py` and `navigation_launch.py` directly, rather than
+going through its own `bringup_launch.py`. That wrapper exists to make `slam`
+choose between `slam_launch.py` and `localization_launch.py` with an
+`IfCondition(['not ', slam])`; here the three workstation modes are a flat
+dispatch already (see the module docstring), so the wrapper has nothing left
+to do. One consequence: `localization_launch.py` and `navigation_launch.py`
+default `use_composition` to `False`, where `bringup_launch.py` defaults it
+`True` and creates the shared `nav2_container` itself — so Nav2's nodes run as
+separate processes here. Slightly more overhead, and it retires the failure
+mode in `docs/network.md` where the container starts and no composable node is
+ever loaded into it.
 
 ## The interface contract
 
@@ -191,10 +232,13 @@ QoS mismatches, which is where nearly all the failures are.
 4. **Write the backends, Gazebo first** — it's the one you already know works.
    Once `backend:=gazebo` reproduces your current two-terminal workflow, the
    dispatch code is done and the other two are just their own launch file.
-5. **Tune Nav2 per backend, last.** There is one `config/nav2_params.yaml`
-   until then; `bringup.launch.py` prefers `config/nav2_<backend>.yaml` the day
-   one exists. Three identical copies of upstream's file are a worse record of
-   "the backends do not differ yet" than one file is.
+5. **Do not tune Nav2 per backend.** There is exactly one
+   `config/nav2_params.yaml`, used unconditionally — `bringup.launch.py` no
+   longer auto-prefers a `config/nav2_<backend>.yaml` if one appears. Per-backend
+   tuning would absorb the sim-to-real gap into the tuning and make it
+   unmeasurable, which is the opposite of what this repository is for; if the
+   backends are ever deliberately tuned differently, that is a measured
+   decision made in code, not a file that happens to exist.
 
 ## The environment contract
 

@@ -225,11 +225,13 @@ else** — `docker compose restart tb3_ros` is the reliable reset, and costs a
   is from before this work (see `docs/history.md`). Nothing in the change
   touches the planner or controller — only where the map comes from and that
   Nav2 now starts on `wait_for_sim`'s exit — but it is worth a run.
-- **Per-backend Nav2 tuning is unstarted.** There is one
+- **Per-backend Nav2 tuning is a non-goal, not unstarted work.** There is one
   `config/nav2_params.yaml`, verbatim `turtlebot3_navigation2`'s
-  `param/humble/burger.yaml`. `bringup.launch.py` prefers
-  `config/nav2_<backend>.yaml` the day one exists. The delta between them is the
-  measurement; there is no delta yet, so there is one file.
+  `param/humble/burger.yaml`, used unconditionally. `bringup.launch.py` used to
+  auto-prefer `config/nav2_<backend>.yaml` if one appeared; that mechanism was
+  removed 2026-09-16 because it made the wrong thing (tuning away the
+  sim-to-real gap it exists to measure) convenient rather than impossible. See
+  `docs/architecture.md`.
 - **`isaacsim_bringup` is pinned to `IsaacSim-6.0.1` while Isaac Sim is 6.1.0.**
   The 6.1.0 tag reimplements `run_isaacsim.launch.py` as
   `run_isaacsim.launch.xml` — argument for argument the same, but a different

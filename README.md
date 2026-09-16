@@ -14,16 +14,20 @@ else is guessed.
 
 ## Modes
 
-Two independent switches, four meaningful runs:
+Three modes:
 
-| | `nav:=false` *(default)* | `nav:=true` |
-|---|---|---|
-| **`slam:=false`** *(default)* | robot only — teleop, `drive_test` | `map_server` + AMCL + Nav2 |
-| **`slam:=true`** | slam_toolbox + teleop; drive it round to map | **Nav2 while mapping** |
+```
+(neither)    robot + RViz. Drive it with a second terminal, attach your own
+             stack, or run ros2 run tb3_bringup drive_test.
+nav:=true    map_server + AMCL + Nav2, on the world's saved map.
+slam:=true   slam_toolbox + Nav2. Navigate while building the map.
+```
 
-`slam` answers *where `map -> odom` comes from*: slam_toolbox builds the map
-and publishes the transform, or `map_server` and AMCL use one recorded earlier.
-`nav` answers *whether the navigation stack runs*. Neither excludes the other.
+`nav:=true` navigates on a saved map; `slam:=true` navigates while making one;
+neither gives you a bare robot. `slam:=true` already runs Nav2, so `slam:=true
+nav:=true` is accepted and means the same thing as `slam:=true` alone. To
+drive manually rather than run Nav2: `ros2 run turtlebot3_teleop
+teleop_keyboard` in a second terminal.
 
 There is no `map:=`. A world's map is `worlds/<name>/map/`, declared by its
 manifest, or it has not been made yet:
@@ -132,6 +136,9 @@ docker compose exec tb3_ros bash
   both simulators, and **how to clone a real environment**.
 - [`docs/architecture.md`](docs/architecture.md) — why it is one container, what
   is imported rather than written here, the Nav2 interface contract.
+- [`docs/experiment.md`](docs/experiment.md) — the four-layer sim-to-real
+  framing, metric definitions, and the run matrix the backend comparisons in
+  `measurements/` fill in.
 - [`docs/setup.md`](docs/setup.md) — getting started, `up -d` + `exec`, where
   the images come from.
 - [`docs/troubleshooting.md`](docs/troubleshooting.md) — failure modes that
