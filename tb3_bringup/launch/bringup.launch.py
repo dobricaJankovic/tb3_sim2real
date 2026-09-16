@@ -1,9 +1,13 @@
 """Single entry point for all three backends.
 
-    ros2 launch tb3_bringup bringup.launch.py backend:=gazebo
+    ros2 launch tb3_bringup bringup.launch.py backend:=gazebo   world:=turtlebot3_world
     ros2 launch tb3_bringup bringup.launch.py backend:=isaacsim world:=empty_stage
-    ros2 launch tb3_bringup bringup.launch.py backend:=real
-    ros2 launch tb3_bringup bringup.launch.py backend:=gazebo world:=/path/to/my_office
+    ros2 launch tb3_bringup bringup.launch.py backend:=real     world:=lab_room
+    ros2 launch tb3_bringup bringup.launch.py backend:=gazebo   world:=/path/to/my_office
+
+Both arguments are required. Neither has a sensible default: `backend` names
+the machine and `world` names the room, and guessing either produces a run that
+looks fine and means nothing.
 
 A run is two layers, the way ROS already splits them:
 
@@ -188,7 +192,13 @@ def generate_launch_description():
             'backend',
             description='Which robot to bring up: real | gazebo | isaacsim'),
         DeclareLaunchArgument(
-            'world', default_value='turtlebot3_world',
+            # Required, deliberately: no default. A world is what makes two
+            # runs comparable, so which one this is must be stated rather than
+            # inherited. A default silently attributes every unqualified run to
+            # turtlebot3_world — including a real-robot run in a room that is
+            # not turtlebot3_world, where the map is simply wrong and Nav2
+            # localises into fiction rather than failing.
+            'world',
             description='Environment: a registry name (worlds/<name>/) or a '
                         'path to a world directory. backend:=real uses it for '
                         'the map only.'),

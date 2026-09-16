@@ -9,8 +9,8 @@ docker compose exec tb3_ros bash       # terminal 1
 
 # inside tb3_ros:
 colcon build --symlink-install && source install/setup.bash
-ros2 launch tb3_bringup bringup.launch.py backend:=gazebo
-ros2 launch tb3_bringup bringup.launch.py backend:=isaacsim
+ros2 launch tb3_bringup bringup.launch.py backend:=gazebo   world:=turtlebot3_world
+ros2 launch tb3_bringup bringup.launch.py backend:=isaacsim world:=turtlebot3_world
 ```
 
 `scripts/workspace.sh` first, and not only because nothing builds without it:
