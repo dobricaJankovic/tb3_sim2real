@@ -1,0 +1,11 @@
+{
+ "label": "gazebo",
+ "status": "SUCCEEDED",
+ "elapsed_s": 22.26,
+ "final_x": 1.7784,
+ "final_y": 0.4968,
+ "final_yaw": 0.0719,
+ "goal_err_m": 0.2216,
+ "yaw_err_rad": 0.0719,
+ "odom_path_m": 4.624
+}
