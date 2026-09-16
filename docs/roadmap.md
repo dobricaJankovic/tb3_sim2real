@@ -39,8 +39,10 @@ run.
 publishes `/initialpose`, which races AMCL's activation — that race is exactly
 what swallowed the pose during the 2026-09-16 hardware test.
 
-**Physical prerequisite:** a floor marker in the real room at the manifest's
-spawn coordinates. Without it the pinned pose is a lie and AMCL starts wrong.
+**Physical prerequisite, confirmed available:** the robot can be placed at an
+exact known location in the real room. The manifest's spawn coordinates become
+that spot. Without this the pinned pose is a lie and AMCL starts wrong, so the
+marker is part of the experimental protocol, not a convenience.
 
 ## 2. Clock sync between robot and workstation
 
@@ -72,7 +74,7 @@ even when the campus network does not. Verify with `chronyc tracking`, or
 ## 3. `slam:=true`, on every backend
 
 Follows `nav2_bringup`'s own shape, where `slam` swaps `localization_launch.py`
-for `slam_launch.py`. Here it swaps `map_server` + AMCL for Cartographer, and
+for `slam_launch.py`. Here it swaps `map_server` + AMCL for slam_toolbox, and
 relaxes the "this world declares no map" error — the run is about to make one.
 
 `nav:=false` therefore stays. It is not dead weight: mapping is precisely the
@@ -94,14 +96,36 @@ how far the simulated environment differs from the real one. Run SLAM only on
 hardware and those two error sources stay fused, and SLAM noise gets attributed
 to the sim-to-real gap.
 
-**Cartographer**, as the TurtleBot3-documented choice. Consequence to remember:
-it is not a lifecycle node, so it sits outside Nav2's lifecycle manager rather
-than coming up with it.
+**Decided: slam_toolbox**, not the Cartographer that the TurtleBot3 docs use.
+It is what `nav2_bringup/slam_launch.py` itself runs, so `slam:=true` becomes
+an include of upstream's own launch rather than a parallel arrangement, and it
+is a lifecycle node — it comes up under Nav2's lifecycle manager instead of
+sitting outside it the way Cartographer would.
 
-**Open:** where the map lands. It has to end up at `worlds/<name>/map.yaml` for
-the registry to own it, but `map_saver_cli` is a manual step by nature. A thin
-wrapper script that saves into the world directory would close the loop from
-SLAM to manifest to all three backends.
+**Decided: the map is saved into `worlds/<name>/map.yaml`, never to
+`map_saver_cli`'s default.** A map that lands in the working directory is a map
+that drifts away from the world it describes, which is the failure the registry
+exists to prevent. `map_saver_cli` is manual by nature, so this wants a thin
+wrapper that takes a world name and writes into its directory — closing the
+loop from SLAM to manifest to all three backends.
+
+**Caveat on the three-map comparison above:** it assumes the manifest is
+authored to match the real room, so that `make_map.py` yields ground truth. The
+world-generation tooling is not settled (see below), and if a world is ever
+derived *from* a SLAM map instead, its geometry inherits SLAM's error and
+comparison 1-vs-2 stops meaning what it says here.
+
+## 3a. World generation is unsettled, and the clone helpers are going
+
+`scripts/clone_world.py` and the generator path around it are **not considered
+good** and are expected to be removed rather than extended. The lab world will
+be provided as an authored USD and SDF plus a manifest, not derived from a
+scan.
+
+Nothing should be built on top of the clone path in the meantime. The question
+of which direction is the source of truth — a room measured and authored into a
+manifest, versus a manifest generated from a scan of the room — is deliberately
+left open and will be settled when the replacement is designed.
 
 ## 4. URDF ownership — settled, no work
 
@@ -133,19 +157,40 @@ an x86 SBC or a Jetson goes on the robot.
 ## Next steps, in order
 
 1. **chrony on both machines.** Cheap, and it removes a whole class of ghost
-   failure. Prerequisite for trusting any hardware measurement.
+   failure. Prerequisite for trusting any hardware measurement. *Started
+   2026-09-16.*
 2. **A systemd unit on the Pi** running `robot.launch.py` at boot. Deletes
    HDMI, password and SSH from the workflow: power on, wait, it publishes.
 3. **`set_initial_pose` from the manifest**, replacing the `/initialpose`
    publish, on all backends. Plus the floor marker in the real room.
-4. **`slam:=true`** wrapping Cartographer, and the error for the
-   nav-and-slam-both-false combination.
-5. **Author or clone the lab world**, and save its SLAM map into
-   `worlds/<name>/map.yaml`.
+4. **`slam:=true`** wrapping slam_toolbox, the map-saving wrapper that writes
+   into the world directory, and the error for the nav-and-slam-both-false
+   combination.
+5. **Author the lab world** (USD + SDF + manifest, not cloned), and save its
+   SLAM map into `worlds/<name>/map.yaml`.
 6. **The first real drive-to-goal**, which is still unrecorded — then the
    three-map comparison from section 3.
 
-Reaching the robot at all is covered in `docs/network.md`. Two further items
-from that discussion, neither urgent: resolving hostnames in `TB3_DDS_PEERS`
-so mDNS names work in place of a DHCP lease, and a DHCP reservation so the
-address stops being a variable.
+## Not urgent: making the robot's address stop being a variable
+
+Reaching the robot at all is covered in `docs/network.md`. Today its address is
+a DHCP lease written into `.env`, and when the lease changes, discovery breaks
+until someone notices and edits one line. Two standard ways out, neither
+started, recorded here because the terms are not obvious:
+
+- **A DHCP reservation.** The network's DHCP server is told "this particular
+  network card always gets this particular address." The robot still asks for
+  an address the normal way and nothing on it changes — it just always gets the
+  same answer. Needs whoever administers the lab network to add the robot's MAC
+  address. This is the clean fix, and it is a request to make rather than code
+  to write.
+- **mDNS / Avahi.** Lets a machine be reached by name — `turtlebot.local` —
+  with no server anywhere deciding addresses; the robot answers for its own
+  name on the local network. Usually already installed on Ubuntu. Good for SSH
+  immediately. One catch for this repo: Fast DDS initial peers want IP
+  addresses, not names, so `TB3_DDS_PEERS=turtlebot.local` would need the
+  entrypoint to resolve the name at container start. Small addition, worth it
+  only once the name resolves reliably on this network.
+
+Either removes "check the robot's IP" from the workflow. The reservation is
+more robust; mDNS needs no one's permission.
