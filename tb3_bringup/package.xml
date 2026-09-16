@@ -23,6 +23,12 @@
   <exec_depend>nav_msgs</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
 
+  <!-- nav_test: NavigateToPose, the behaviour tree log, map->base_footprint -->
+  <exec_depend>nav2_msgs</exec_depend>
+  <exec_depend>action_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>ros2bag</exec_depend>
+
   <!-- shared across all backends -->
   <exec_depend>robot_state_publisher</exec_depend>
   <exec_depend>turtlebot3_description</exec_depend>

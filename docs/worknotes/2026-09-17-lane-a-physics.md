@@ -175,3 +175,130 @@ Also dead, as by-products of the same run:
   the body at all (§5).
 - **H2 (torque saturation)** — dead, FLT_MAX.
 
+## 4. What it actually is: the wheel is not slow, it is **chattering**
+
+The mean was hiding the signal. Same runs, same phases, but the standard
+deviation of the joint velocity over the steady-state window instead of only
+its mean (`measurements/2026-09-16_pre_*_default.samples.json`):
+
+| phase | wheel | commanded | **gazebo** mean / sd | **isaacsim** mean / sd | isaac sd as % of command |
+|---|---|---|---|---|---|
+| `straight` | L | 4.5455 | 4.5455 / **0.0000** | 4.4432 / 0.0698 | 1.5% |
+| `straight` | R | 4.5455 | 4.5455 / **0.0000** | 4.4477 / 0.0450 | 1.0% |
+| `rotate` | L | −1.2121 | −1.2118 / **0.0000** | −0.7925 / **0.4463** | **36.8%** |
+| `rotate` | R | 1.2121 | 1.2117 / **0.0000** | 0.8214 / **0.3726** | **30.7%** |
+| `arc` | L | 2.3030 | 2.3031 / **0.0000** | 2.4021 / 0.3062 | 13.3% |
+| `arc` | R | 3.7576 | 3.7574 / **0.0000** | 3.4334 / 0.1676 | 4.5% |
+
+During `rotate`, commanded a steady −1.2121 rad/s, the left wheel ranges from
+**−2.9066 to +1.0422 rad/s**. It overshoots the target by 2.4x and it reverses
+direction. The mean of that, −0.79, is what every previous measurement recorded
+as "Isaac Sim delivers 65% of the commanded rate".
+
+**It does not deliver 65% of the rate. It is unstable, and 65% is the average
+of the instability.** Gazebo's standard deviation is 0.0000 to four decimals in
+every phase — its wheels are not merely accurate, they are noise-free.
+
+This is consistent with everything else and explains what the gain sweep could
+not:
+
+- **Why the gain does not matter.** The oscillation amplitude is set by the
+  contact/solver interaction, not by the servo gain, so `D` can move four
+  decades without changing the mean. At the highest damping the differential
+  error is marginally *worse*, which is what a stiffer drive at a fixed
+  timestep should do to a chattering contact.
+- **Why a wheel exceeds its command.** It is oscillating, not tracking.
+- **Why the error looked like a constant absolute offset.** A chatter-induced
+  bias is roughly set by the oscillation amplitude and so barely depends on the
+  commanded rate — which reads exactly like `tau / D` in a table of means, and
+  is why the original diagnosis in `measurements/isaac_angular_deficit.md` was
+  a reasonable inference from the data it had.
+- **Why differential mode is far worse than common mode.** Yaw is the soft
+  degree of freedom: it is resisted by the caster skid scrubbing sideways,
+  which is a sliding box contact and the classic source of stick-slip chatter.
+
+### A related asymmetry the world registry does not cover
+
+The two backends' robots do not have the same physics materials, and nothing
+checks this. `turtlebot3_gazebo`'s `model.sdf` gives each wheel
+**`mu = 100000`**; `turtlebot3_isaacsim`'s asset gives the wheel material
+**`staticFriction = dynamicFriction = 1.0`**, with the chassis and caster at
+0.1 and `frictionCombineMode = "min"`.
+
+`scripts/check_worlds.py` proves the *world* is identical across backends by
+construction. **The robot is not part of the manifest**, so its materials,
+masses and drive parameters are authored independently in two packages, and a
+divergence there is exactly as damaging to a comparison as a divergence in the
+world would be — with nothing to catch it. This is the same class of defect as
+F9.1 (a map carries no provenance) and is recorded here rather than fixed: it
+is a schema question, not a tonight question.
+
+### And a fidelity point that outlives this bug
+
+Gazebo's `sd = 0.0000` is not Gazebo being better. `gazebo_ros_diff_drive`
+drives the wheels through an ODE joint motor with `fmax = max_wheel_torque`,
+i.e. an **ideal velocity source** with a force cap; the wheel takes the
+commanded velocity exactly, and with `mu = 100000` it cannot slip either. So:
+
+| | actuator | wheel slip |
+|---|---|---|
+| gazebo | ideal velocity source, exact | effectively impossible (`mu = 1e5`) |
+| isaacsim | dynamic, torque-driven, currently unstable | possible, friction 1.0 |
+| real burger | encoder PID, tracks well, finite | real |
+
+**Neither simulator models the actuator faithfully, and they fail in opposite
+directions** — one cannot be wrong, the other cannot be right. That is a
+sharper statement of where the sim-to-real gap lives than "Isaac under-rotates"
+and it does not depend on fixing anything.
+
+## 5. A2 — the discriminating tests, and the mechanism
+
+`measurements/isaac_drive_probe2.json`. Each row rebuilds the stage, changes
+exactly one thing, and commands the wheels directly. Errors in rad/s;
+`common` drives the robot forward, `diff` pivots it.
+
+| what was changed | common 1.818 | common 4.545 | diff 1.212 | diff 2.424 |
+|---|---|---|---|---|
+| **nothing** (60 Hz, as shipped) | 0.0833 | 0.0951 | 0.3482 | 0.3591 |
+| **no gravity, no ground plane** | **0.0000** | **0.0000** | **0.0000** | **0.0000** |
+| physics 120 Hz | 0.0291 | 0.0345 | 0.1989 | 0.2166 |
+| physics 240 Hz | 0.0028 | 0.0002 | 0.0935 | 0.0687 |
+| solver iterations 64 | 0.0284 | 0.0339 | 0.2965 | 0.0554 |
+| solver iterations 255 | 0.0019 | 0.0013 | 0.1670 | 0.2458 |
+| caster friction 0.1 → 0.0 | 0.0069 | 0.0219 | 0.3325 | 0.2685 |
+
+### The decisive row
+
+**Lift the robot off the ground and the error is exactly zero — in every mode,
+at every rate, to four decimal places.** Tracking ratio 1.0000.
+
+The drive is not weak, not saturated, not mistuned and not miscommanded. Given
+nothing to push against it reproduces its commanded velocity perfectly. **The
+entire deficit is created by the contact solve**, and it therefore could never
+have been fixed by a gain — which is why the 10,000x sweep in §3 did nothing.
+
+This is also the test that no ROS-level measurement can perform, and it took
+about forty seconds.
+
+### What it is
+
+Both remaining knobs point the same way. The error falls monotonically with the
+physics timestep — 0.0833 → 0.0291 → 0.0028 in common mode across 60/120/240 Hz
+— and it falls with solver iterations at fixed dt. That is the signature of an
+**unconverged contact solve**: at `dt = 1/60` the solver does not reach a
+consistent state between the wheel drive constraints and the ground contacts,
+and the residual shows up as the velocity chatter in §4. **H5 is supported; H1,
+H2, H0 and H4 are dead, and H3 is confirmed in the specific sense that contact
+is *necessary* — but the fault is in how the contact is solved, not in the
+friction values.**
+
+**The caster is not the cause.** Taking its friction to zero leaves the
+differential error essentially unchanged (0.3482 → 0.3325), which rules out the
+stick-slip reading that §4's reasoning suggested and that the asymmetry between
+the modes would otherwise support. It does help common mode (0.0833 → 0.0069),
+so the caster is a real drag on straight-line motion — just not the instability.
+
+Why yaw is the worse mode is therefore **not** settled. It is the softer degree
+of freedom and it is the one the caster contact couples into, but the caster
+test says the coupling is not through friction. Recorded as open in §9.
+
