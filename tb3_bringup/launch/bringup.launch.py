@@ -29,6 +29,24 @@ because the environment is already around it. All three take the robot's start
 pose and the Nav2 map from the same manifest, which is what makes a run on one
 backend comparable with a run on another.
 
+The workstation layer is two independent questions, not one three-way choice:
+
+                 nav:=false                  nav:=true
+  slam:=false    robot only; teleop          map_server + AMCL + Nav2
+  slam:=true     slam_toolbox + teleop       Nav2 while mapping
+
+`slam` answers *where does map->odom come from* — slam_toolbox builds the map
+and publishes the transform, or map_server and AMCL use one built earlier.
+`nav` answers *does the navigation stack run*. Neither excludes the other, so
+no combination has to be rejected, and `slam:=true nav:=true` is a real mode:
+Nav2 plans over a map that slam_toolbox is still drawing.
+
+Both default false. `world:=` is required and `map:=` does not exist — the map
+is `worlds/<name>/map.yaml` or it has not been made yet, and `slam:=true` is
+how it gets made. A map passed on the command line is a map that drifts away
+from the world it describes, which is the failure the registry exists to
+prevent.
+
 OpaqueFunction rather than IfCondition, so the backend argument is a plain
 Python string we can branch on. That also lets us derive use_sim_time from the
 backend instead of making the operator remember it.
@@ -68,6 +86,8 @@ def params_file(pkg, backend):
 
 def setup(context, *args, **kwargs):
     pkg = get_package_share_directory('tb3_bringup')
+    nav2_launch_dir = os.path.join(
+        get_package_share_directory('nav2_bringup'), 'launch')
 
     backend = LaunchConfiguration('backend').perform(context)
     if backend not in worlds.BACKENDS:
@@ -80,7 +100,7 @@ def setup(context, *args, **kwargs):
 
     world = worlds.World.load(LaunchConfiguration('world').perform(context))
 
-    def inc(rel, **extra):
+    def inc(path, **extra):
         # scoped + forwarding=False, and both halves are load-bearing.
         #
         # IncludeLaunchDescription on its own does NOT isolate launch
@@ -90,14 +110,34 @@ def setup(context, *args, **kwargs):
         # So `world` — a registry name here — would arrive at the backend as a
         # name where it expects a resolved path, and `headless` would collide
         # with isaacsim_bringup's own differently-typed argument of that name.
+        # Upstream's files care too: `slam` leaking into navigation_launch.py
+        # would be read as its own unrelated argument.
         return GroupAction(
             [IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(os.path.join(pkg, 'launch', rel)),
+                PythonLaunchDescriptionSource(path),
                 launch_arguments={'use_sim_time': use_sim_time, **extra}.items(),
             )],
             scoped=True,
             forwarding=False,
         )
+
+    def ours(rel):
+        return os.path.join(pkg, 'launch', rel)
+
+    def nav2(rel):
+        # nav2_bringup's own launch files, included directly rather than
+        # through its bringup_launch.py. That wrapper exists to make `slam`
+        # choose between slam_launch.py and localization_launch.py with an
+        # `IfCondition(['not ', slam])`; here the two questions are
+        # independent, so the wrapper has nothing left to do.
+        #
+        # One consequence: localization_launch.py and navigation_launch.py
+        # default `use_composition` to False, where bringup_launch.py defaults
+        # it True and creates the shared `nav2_container` itself. So Nav2's
+        # nodes now run as separate processes. Slightly more overhead, and it
+        # retires the failure mode in docs/network.md where the container
+        # starts and no composable node is ever loaded into it.
+        return os.path.join(nav2_launch_dir, rel)
 
     x, y, z, yaw = world.spawn
     backend_args = {}
@@ -134,36 +174,51 @@ def setup(context, *args, **kwargs):
     # process aborts before it opens the serial port with
     # `Statically typed parameter 'namespace' must be initialized`.
     actions = [] if backend == 'real' else [
-        inc('common/state_publisher.launch.py'),
-        inc(f'backends/{backend}.launch.py', **backend_args),
+        inc(ours('common/state_publisher.launch.py')),
+        inc(ours(f'backends/{backend}.launch.py'), **backend_args),
     ]
 
-    if LaunchConfiguration('nav').perform(context) != 'true':
-        # Every local process this launch would start is in `actions`, and for
-        # backend:=real there are none — so nav:=false there leaves nothing at
-        # all to run. Say so rather than exiting silently with no output.
-        if not actions:
+    if LaunchConfiguration('rviz').perform(context) == 'true':
+        actions.append(inc(ours('common/rviz.launch.py')))
+
+    # The workstation layer. Two independent questions; see the grid at the top
+    # of this file. The dispatch is deliberately flat — `slam` picks the source
+    # of map->odom, `nav` switches the navigation stack on, and neither is
+    # phrased as the absence of the other.
+    slam = LaunchConfiguration('slam').perform(context) == 'true'
+    nav = LaunchConfiguration('nav').perform(context) == 'true'
+    params = params_file(pkg, backend)
+
+    stack = []
+    if slam:
+        # slam_toolbox serves /map and publishes map->odom, so map_server and
+        # AMCL must not also run. Upstream's slam_launch.py adds a
+        # lifecycle-managed map_saver_server alongside it.
+        #
+        # slam_toolbox on Humble is a plain rclcpp::Node, NOT a lifecycle node:
+        # slam_launch.py's lifecycle manager governs `map_saver` and nothing
+        # else. Do not wait for a transition that never arrives.
+        stack.append(inc(nav2('slam_launch.py'), params_file=params))
+    elif nav:
+        map_yaml = world.map()
+        if not map_yaml:
             raise RuntimeError(
-                'backend:=real nav:=false starts nothing: the robot layer is '
-                'on the robot, and nav:=false switches off the workstation '
-                'layer this launch exists to provide.\n'
-                '  Use nav:=true here, or run teleop/drive_test directly.')
+                f"nav:=true needs a map, and world '{world.name}' has none.\n"
+                f'  Make one: run with slam:=true, drive the robot around, then '
+                f'scripts/save_map.py {world.name}\n'
+                f'  (There is no map:= argument. A map lives in its world\'s '
+                f'directory or it does not exist — see worlds/README.md.)')
+        stack.append(inc(nav2('localization_launch.py'),
+                         map=map_yaml, params_file=params))
+
+    if nav:
+        stack.append(inc(nav2('navigation_launch.py'), params_file=params))
+
+    if not stack:
         return actions
 
-    map_yaml = LaunchConfiguration('map').perform(context) or world.map()
-    if not map_yaml:
-        raise RuntimeError(
-            f"nav:=true needs a map, and world '{world.name}' declares none.\n"
-            f'  Either pass map:=/path/to/map.yaml, or run with nav:=false, or '
-            f'give the world a map: key (see worlds/README.md).')
-
-    nav2 = inc('common/nav2.launch.py',
-               params_file=params_file(pkg, backend),
-               map=map_yaml,
-               rviz=LaunchConfiguration('rviz').perform(context))
-
     if not simulated:
-        return actions + [nav2]
+        return actions + stack
 
     # Nav2 with use_sim_time:=true waits for /clock silently, which looks
     # exactly like a DDS domain mismatch or a simulator that never started —
@@ -174,14 +229,13 @@ def setup(context, *args, **kwargs):
                   name='wait_for_sim', output='screen')
     return actions + [
         waiter,
-        # handle_once, or Nav2 is brought up twice: the handler stays registered
-        # otherwise and a second matching exit runs bringup_launch.py again,
-        # loading every composable node into a second nav2_container. The
-        # symptom is a wall of `Transition is not registered` and
-        # `Node '/local_costmap/local_costmap' has already been added to an
-        # executor`, and both containers then abort.
+        # handle_once, or the whole stack is brought up twice: the handler
+        # stays registered otherwise and a second matching exit runs every
+        # include again. The symptom is a wall of `Transition is not
+        # registered` and `Node '/local_costmap/local_costmap' has already been
+        # added to an executor`.
         RegisterEventHandler(OnProcessExit(target_action=waiter,
-                                           on_exit=[nav2],
+                                           on_exit=stack,
                                            handle_once=True)),
     ]
 
@@ -203,8 +257,16 @@ def generate_launch_description():
                         'path to a world directory. backend:=real uses it for '
                         'the map only.'),
         DeclareLaunchArgument(
-            'nav', default_value='true',
-            description='Also start the Nav2 stack'),
+            'nav', default_value='false',
+            description='Run the navigation stack: planner, controller, '
+                        'behaviours, bt_navigator. Without slam:=true it also '
+                        "runs map_server and AMCL on the world's map."),
+        DeclareLaunchArgument(
+            'slam', default_value='false',
+            description='Build the map as you go: slam_toolbox supplies /map '
+                        'and map->odom in place of map_server and AMCL. '
+                        'Combines with nav:=true. Save the result with '
+                        'scripts/save_map.py <world>.'),
         DeclareLaunchArgument(
             'rviz', default_value='true',
             description='Also start RViz'),
@@ -212,8 +274,5 @@ def generate_launch_description():
             'headless', default_value='false',
             description='Run the simulator with no window (ignored by '
                         'backend:=real)'),
-        DeclareLaunchArgument(
-            'map', default_value='',
-            description="Occupancy map for Nav2; empty means the world's own"),
         OpaqueFunction(function=setup),
     ])

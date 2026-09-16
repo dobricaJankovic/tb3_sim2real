@@ -150,17 +150,38 @@ after the machine has been up an hour. And a correction applied *during* a run
 is worse than a constant offset, because it invalidates tf caches on both
 sides; let the clock settle before launching anything.
 
-## 3. `slam:=true`, on every backend
+## 3. `slam:=true`, on every backend — **built, 2026-09-16**
 
 Follows `nav2_bringup`'s own shape, where `slam` swaps `localization_launch.py`
 for `slam_launch.py`. Here it swaps `map_server` + AMCL for slam_toolbox, and
 relaxes the "this world declares no map" error — the run is about to make one.
 
-`nav:=false` therefore stays. It is not dead weight: mapping is precisely the
-mode where `map_server` and AMCL must *not* run, and `drive_test` and teleop
-want it too. The only genuinely empty combination is `backend:=real` with
-neither nav nor slam, which is worth an explicit error rather than a silent
-exit with no output.
+**What was actually built is better than this, and the paragraph above
+understates it.** SLAM and navigation are not alternatives. slam_toolbox
+supplies `/map` and `map -> odom`; the navigation stack consumes them and does
+not care which of slam_toolbox or AMCL produced them. So `slam` and `nav` are
+*independent*, and `slam:=true nav:=true` is a real mode — Nav2 planning over a
+map that is still being drawn:
+
+|  | `nav:=false` | `nav:=true` |
+|---|---|---|
+| `slam:=false` | robot only; teleop | `map_server` + AMCL + Nav2 |
+| `slam:=true`  | slam_toolbox + teleop | Nav2 while mapping |
+
+Both default false, and the dispatch in `bringup.launch.py` is flat — no
+combination is rejected and neither flag is phrased as the absence of the
+other. That also means `nav2_bringup/bringup_launch.py` is no longer included:
+its whole job was the `IfCondition(['not ', slam])` switch, which has nothing
+left to do. `slam_launch.py`, `localization_launch.py` and
+`navigation_launch.py` are included directly instead. A side effect worth
+knowing: those three default `use_composition` to False where
+`bringup_launch.py` defaulted it True, so Nav2's nodes are separate processes
+now — which retires the `docs/network.md` failure where the container comes up
+and no composable node is ever loaded into it.
+
+`backend:=real` with neither flag no longer errors. It starts RViz, which is
+the one useful thing the workstation can do with no stack selected, and is also
+how you see in one second that a robot publishing `/scan` has no `odom` frame.
 
 **SLAM is allowed on the simulated backends too**, against the instinct that it
 only makes sense on hardware. Three maps of one room are then available:
@@ -198,12 +219,24 @@ already does the switch this wants, as `IfCondition(slam)` against
 declare `slam` in `common/nav2.launch.py` and forward it into the existing
 include, letting upstream fork, rather than arranging anything here.
 
+**Built, and stronger than decided: there is no `map:=` argument at all.** A
+map passed on the command line is a map that drifts away from the world it
+describes. `world:=` is required, and its map is `worlds/<name>/map/` or it has
+not been made yet — which is what `slam:=true` is for.
+
 **Decided: the map is saved into `worlds/<name>/map.yaml`, never to
 `map_saver_cli`'s default.** A map that lands in the working directory is a map
 that drifts away from the world it describes, which is the failure the registry
 exists to prevent. `map_saver_cli` is manual by nature, so this wants a thin
 wrapper that takes a world name and writes into its directory — closing the
 loop from SLAM to manifest to all three backends.
+
+Built as `scripts/save_map.py <world>`, run by hand in a second terminal while
+SLAM is still up — deliberately not automatic on shutdown, where a
+half-finished run would silently overwrite a good map. It refuses to replace an
+existing map without `--force`, and it adds the `map:` key to the manifest,
+because a map on disk the manifest does not declare is invisible to every
+backend.
 
 Two ways to write the file, both present on Humble:
 `ros2 run nav2_map_server map_saver_cli -f worlds/<name>/map`, which subscribes
@@ -285,9 +318,12 @@ is inert rather than an error.
    HDMI, password and SSH from the workflow: power on, wait, it publishes.
 3. **`set_initial_pose` from the manifest**, replacing the `/initialpose`
    publish, on all backends. Plus the floor marker in the real room.
-4. **`slam:=true`** wrapping slam_toolbox, the map-saving wrapper that writes
-   into the world directory, and the error for the nav-and-slam-both-false
-   combination.
+4. ~~**`slam:=true`** wrapping slam_toolbox, the map-saving wrapper that writes
+   into the world directory.~~ **Done 2026-09-16**, with `slam` and `nav`
+   independent rather than alternative — see section 3. Not yet driven: SLAM
+   has been launched on gazebo and produces the right node set, but no map has
+   been made end-to-end and `save_map.py` has only been exercised against its
+   guards.
 5. **Author the lab world** (USD + SDF + manifest, not cloned), and save its
    SLAM map into `worlds/<name>/map.yaml`.
 6. **The first real drive-to-goal**, which is still unrecorded — then the

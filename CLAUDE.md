@@ -11,8 +11,16 @@ one level up is the world registry: one manifest per environment, both
 simulators' representations generated from it.
 
 ```bash
-ros2 launch tb3_bringup bringup.launch.py backend:={gazebo|isaacsim|real} world:=<name|path>
+ros2 launch tb3_bringup bringup.launch.py \
+    backend:={gazebo|isaacsim|real} world:=<name|path> [nav:=true] [slam:=true]
 ```
+
+`backend` and `world` are required. `nav` and `slam` are independent and both
+default false: `slam` chooses where `map -> odom` comes from (slam_toolbox
+building a map, or `map_server` + AMCL reading one), `nav` switches on the
+navigation stack, and `slam:=true nav:=true` navigates while mapping. There is
+no `map:=` — a map lives in `worlds/<name>/map/` and is written there by
+`scripts/save_map.py <world>`.
 
 Everything runs in **one container**, `tb3_ros` — Ubuntu 22.04, system ROS 2
 Humble, plus Isaac Sim 6.1 at `/isaac-sim` on Kit's own Python 3.12. `docker
@@ -23,8 +31,10 @@ compose up -d` then `docker compose exec`.
 ```
 tb3_bringup/          the ROS 2 package: launch/bringup.launch.py dispatches on
                       `backend`; launch/backends/ is the only layer that varies;
-                      launch/common/ (state_publisher, nav2) is identical
-                      everywhere; tb3_bringup/worlds.py is the registry, read by
+                      launch/common/ (state_publisher, rviz) is identical
+                      everywhere; the Nav2 and slam_toolbox halves are
+                      nav2_bringup's own launch files, included directly;
+                      tb3_bringup/worlds.py is the registry, read by
                       the launch files AND the generators
 worlds/<name>/        world registry. world.yaml is the source of truth; the
                       Gazebo .world and the Isaac .usd are generated from it and
@@ -36,6 +46,8 @@ scripts/              workspace.sh (vcs import), build_images.sh,
                       world), make_map.py (the inverse, for a world that was
                       DESIGNED -- read its docstring before using it),
                       dae_to_obj.py (Isaac Sim reads no Collada),
+                      save_map.py (a SLAM map -> worlds/<name>/, the only
+                      supported destination),
                       check_worlds.py (the drift check), snapshot.py /
                       snapshot_gazebo.py (render either backend headless)
 measurements/         recorded backend comparisons. `ros2 run tb3_bringup

@@ -4,10 +4,39 @@ Nav2 on a TurtleBot3, against **three interchangeable backends** — the real
 robot, Gazebo Classic, and Isaac Sim — from one launch command.
 
 ```bash
-ros2 launch tb3_bringup bringup.launch.py backend:=gazebo   world:=turtlebot3_world
-ros2 launch tb3_bringup bringup.launch.py backend:=isaacsim world:=turtlebot3_world
-ros2 launch tb3_bringup bringup.launch.py backend:=real     world:=lab_room   # the room it is standing in
+ros2 launch tb3_bringup bringup.launch.py backend:=gazebo   world:=turtlebot3_world nav:=true
+ros2 launch tb3_bringup bringup.launch.py backend:=isaacsim world:=turtlebot3_world nav:=true
+ros2 launch tb3_bringup bringup.launch.py backend:=real     world:=lab_room        nav:=true
 ```
+
+`backend:=` and `world:=` are both required — the machine and the room. Nothing
+else is guessed.
+
+## Modes
+
+Two independent switches, four meaningful runs:
+
+| | `nav:=false` *(default)* | `nav:=true` |
+|---|---|---|
+| **`slam:=false`** *(default)* | robot only — teleop, `drive_test` | `map_server` + AMCL + Nav2 |
+| **`slam:=true`** | slam_toolbox + teleop; drive it round to map | **Nav2 while mapping** |
+
+`slam` answers *where `map -> odom` comes from*: slam_toolbox builds the map
+and publishes the transform, or `map_server` and AMCL use one recorded earlier.
+`nav` answers *whether the navigation stack runs*. Neither excludes the other.
+
+There is no `map:=`. A world's map is `worlds/<name>/map/`, declared by its
+manifest, or it has not been made yet:
+
+```bash
+ros2 launch tb3_bringup bringup.launch.py backend:=real world:=lab_room slam:=true
+# drive it around, then, in another terminal:
+scripts/save_map.py lab_room
+```
+
+That writes the map into the world directory and adds the `map:` key, after
+which `nav:=true world:=lab_room` works on all three backends with no further
+argument.
 
 `use_sim_time` is derived from `backend`. You should never pass it by hand
 again. Everything above `base_footprint` is one URDF and one

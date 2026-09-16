@@ -44,9 +44,9 @@ and the colour is manifest data because both renderers need it.
 ## Using one
 
 ```bash
-ros2 launch tb3_bringup bringup.launch.py backend:=gazebo   world:=turtlebot3_world
-ros2 launch tb3_bringup bringup.launch.py backend:=isaacsim world:=turtlebot3_world
-ros2 launch tb3_bringup bringup.launch.py backend:=real     world:=turtlebot3_world
+ros2 launch tb3_bringup bringup.launch.py backend:=gazebo   world:=turtlebot3_world nav:=true
+ros2 launch tb3_bringup bringup.launch.py backend:=isaacsim world:=turtlebot3_world nav:=true
+ros2 launch tb3_bringup bringup.launch.py backend:=real     world:=turtlebot3_world nav:=true
 ```
 
 `world:=` names the **environment**, not a file, and means the same thing on
@@ -302,7 +302,8 @@ For a measured room, or anything simpler than a scan:
    spawn:
      xyz: [0.0, 0.0, 0.01]
      yaw: 0.0
-   map: map/my_office.yaml    # optional; needed for nav:=true
+   map: map/my_office.yaml    # optional; needed for nav:=true.
+                              # scripts/save_map.py writes it after slam:=true
    bodies:
      - name: wall_n
        geometry: {type: box, size: [5.0, 0.1, 1.0]}

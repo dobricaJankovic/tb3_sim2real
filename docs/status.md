@@ -137,6 +137,16 @@ The 324-vs-307 gap is the no-return encoding, not the geometry: Isaac reports
 - **`scripts/clone_world.py`** — round-tripped: the stock `turtlebot3_world`
   map cloned into a world directory scores 100% of the map modelled and 0% of
   the model absent from the map at the burger's 0.182 m beam height.
+- **All four `nav` / `slam` combinations on gazebo**, measured 2026-09-16 by
+  `ros2 node list` 34 s after launch. Neither flag: the backend and
+  `robot_state_publisher`, nothing else. `nav:=true`: `amcl`, `map_server` and
+  the full navigation stack under two lifecycle managers. `slam:=true`:
+  `slam_toolbox` and `map_saver` **and no `amcl` or `map_server`**.
+  `slam:=true nav:=true`: `slam_toolbox` plus the whole navigation stack, still
+  with no `amcl` or `map_server` — Nav2 planning over a map slam_toolbox is
+  drawing. `nav:=true` on a world with no map raises and names the fix;
+  `slam:=true` on the same world does not. `backend:=real` with neither flag
+  starts RViz and nothing else.
 - **`nav:=true` on gazebo** — the whole stack up with **zero errors**: `amcl`,
   `map_server`, `planner_server`, `controller_server`, `behavior_server`,
   `bt_navigator`. `/map` is 384x384 at 0.05 m, served out of
