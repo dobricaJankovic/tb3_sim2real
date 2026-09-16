@@ -155,6 +155,15 @@ args` only walks the static launch-description tree, it doesn't execute the
 catch a bad path inside that function; the `get_package_share_directory` check
 above is what actually confirmed the new file is reachable at that path.
 
+None of this was rebuilt through `colcon` — I mirrored the `runtime/` move and
+the new `world.launch.py` into `/ws/install/.../share/turtlebot3_isaacsim/`
+by hand with symlinks, just for the checks above, and left the stale
+pre-move copies of `turtlebot3_isaacsim.py`/`assets.py` sitting under the old
+`.../share/turtlebot3_isaacsim/scripts/` (harmless — nothing references that
+path anymore — but a plain `colcon build --symlink-install` in the morning
+will clear them out properly and is worth doing before trusting the install
+tree for anything else).
+
 ## Six launch files -> one parameterised + five examples
 
 New `launch/world.launch.py` holds the `isaacsim.launch.py` +
