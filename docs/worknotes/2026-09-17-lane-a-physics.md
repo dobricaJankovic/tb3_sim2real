@@ -380,3 +380,153 @@ Three things fall out, and two of them are traps:
 inside 0.06% at every speed, differential inside 3.9% and falling to 0.5% at
 1.0 rad/s, with the lowest chatter of any setting tried.
 
+## 8. A3 — the fix, and what it is not
+
+**It is not a change to the asset, and not a gain.** The brief's A3 assumed the
+fix would be a drive parameter written by `scripts/import_turtlebot3.py`. The
+measurements say otherwise, so the fix is where the mechanism is: the physics
+sub-step rate.
+
+`turtlebot3_isaacsim`, commit `c4a224e`:
+
+```
+launch/isaacsim.launch.py     physics_hz    default 60.0 -> 480.0
+runtime/turtlebot3_isaacsim.py --physics-hz default 60.0 -> 480.0
+```
+
+Both, so the launcher and a direct invocation agree. The reasoning sits on the
+launch argument, where someone changing the number will read it.
+
+`import_turtlebot3.py` and `models/` are **untouched** — no re-bake, no asset
+diff, and the `1.0e5` damping with its "TODO unverified gain" comment is left
+exactly as it was. It is no longer known to be wrong; it is known not to
+matter, which is a different and better-supported statement. The comment should
+eventually say so.
+
+### What it costs
+
+Measured through the launcher, not inferred: **RTF 0.68** at 480 Hz — sim
+13.63 s in 20.00 s of wall clock.
+
+And `/clock` still publishes at **41 Hz**. That confirms the mechanism is what
+the code comment claims: `SimulationManager.setup_simulation(dt=)` resolves to
+`PhysxScene.set_steps_per_second`, i.e. PhysX sub-steps *within* a frame. The
+OmniGraph, and therefore every ROS topic and the whole interface contract,
+still ticks at the render rate. **Eight times the physics for about a third of
+the wall clock, and no change to the published interface.**
+
+## 9. A4 — acceptance. Partly met, and the part that is not is named
+
+`measurements/2026-09-17_post_isaacsim_sweep.json` against
+`measurements/2026-09-16_pre_isaacsim_sweep.json`. Same instrument, same
+sequence, same world, same commit of everything except `physics_hz`.
+
+### Layer 1: wheel tracking against the analytic command (the A4 target)
+
+| command | 60 Hz L / R | 480 Hz L / R | within 1%? |
+|---|---|---|---|
+| `vx = 0.10` | 0.9762 / 0.9731 | **1.0028 / 0.9995** | **yes** |
+| `vx = 0.15` | 0.9846 / 0.9819 | **0.9992 / 0.9984** | **yes** |
+| `vx = 0.22` | 0.9906 / 0.9876 | **1.0002 / 0.9990** | **yes** |
+| `wz = 0.2` | 0.4830 / 0.4746 | 0.9867 / 0.8778 | no — R is 12.2% short |
+| `wz = 0.5` | 0.7437 / 0.7438 | 0.9723 / 0.9634 | no — 2.8 / 3.7% |
+| `wz = 1.0` | 0.8745 / 0.8745 | 1.0110 / 1.0122 | no — 1.1 / 1.2% |
+| `wz = 1.5` | 0.9589 / 0.8925 | 0.9977 / 1.0085 | borderline — 0.2 / 0.9% |
+
+**Translation meets the 1% criterion at every speed. Rotation does not**,
+though it improves from 48% to 88% at the worst point.
+
+### Chatter, which is the thing actually being fixed
+
+| phase | 60 Hz sd | 480 Hz sd | | 60 Hz range | 480 Hz range |
+|---|---|---|---|---|---|
+| `rotate` wz 0.5 | 0.4463 | **0.1164** | −3.8x | −2.91 … +1.04 | −1.89 … −0.51 |
+| `straight` vx 0.15 | 0.0698 | **0.0133** | −5.2x | 4.13 … 4.59 | 4.51 … 4.59 |
+
+The wheel no longer reverses direction under a steady command.
+
+### The `drive_test` acceptance numbers
+
+| | commanded | accept | 60 Hz | 480 Hz | |
+|---|---|---|---|---|---|
+| rotate | 2.500 rad | ≥ 2.45 | 1.804 | **2.195** | **FAILS** (87.8%) |
+| straight | 0.750 m | ≥ 0.735 | 0.7161 | **0.7352** | **passes**, by 0.0002 m |
+
+### F5 — did rotation and translation improve together?
+
+**Yes.** Rotation 72.2% → 87.8%, translation 95.5% → 98.0%, in the same run
+from the same single change. F5 was the check on whether the mechanism was the
+right one, and it passes.
+
+### The `wz` sweep is not flat
+
+80.0 / 87.8 / 98.8 / 94.5% at wz = 0.2 / 0.5 / 1.0 / 1.5. **The low-rate regime
+is still the worst**, and that is Nav2's final-alignment regime. A4 asked for a
+flat sweep and this is not one.
+
+### Where the remaining error went — it changed layer
+
+| | 60 Hz | 480 Hz |
+|---|---|---|
+| command → wheel (actuator) | the dominant error: 25–52% | 0.2–3.7%, and ~12% at `wz = 0.2` |
+| wheel → body (slip) | −0.4 to −3.9% | **−2.5 to −8.5%** |
+
+At 60 Hz the wheels never reached their command and the robot barely slipped. At
+480 Hz the wheels track and **the robot genuinely slides** in a pivot. The
+residual has moved from the actuator into the contact, which is a more honest
+place for it — a real burger pivoting on two wheels and a plastic skid does
+slip — but it is now the thing standing between this and the 1% target, and it
+has not been characterised.
+
+**Verdict: the translation half of A4 is met and the rotation half is not.**
+Reported as such rather than as a fix.
+
+## 10. A6 — repeatability, and how many repeats the navigation experiment needs
+
+Ten complete runs of `sequence:=default` on Isaac Sim at 480 Hz, each a fresh
+simulator (`measurements/2026-09-17_rep_isaacsim_r1..r10.json`). A fresh boot
+each time on purpose: that is what varies between two `nav_test` runs, so
+anything held constant inside one process would understate the spread.
+
+| metric | mean | sd | cv | range |
+|---|---|---|---|---|
+| `straight` distance | 0.73207 m | 0.00487 | **0.66%** | 0.0170 |
+| `rotate` yaw | 2.24431 rad | 0.03560 | **1.59%** | 0.0960 |
+| `arc` yaw | 1.28306 rad | 0.02067 | 1.61% | 0.0718 |
+| `arc` distance | 0.45112 m | 0.00961 | 2.13% | 0.0335 |
+| `straight` wheel tracking | 1.00069 | 0.00059 | **0.06%** | 0.0020 |
+| `rotate` wheel tracking | 0.96942 | 0.01701 | 1.76% | 0.0525 |
+
+`docs/status.md` records the pre-fix spread as 0.0063 m and 0.042 rad; at
+480 Hz it is 0.0049 m and 0.0356 rad. **Slightly more repeatable than before,
+not less** — worth saying, because raising a solver rate could easily have gone
+the other way, and because the 64-iteration variants in §7 show what it looks
+like when it does.
+
+Note the split: the *actuator* is now almost perfectly repeatable in a straight
+line (cv 0.06%), while everything involving rotation sits near 1.6–2.1%. The
+run-to-run variability lives in the same place the residual error does — the
+contact, in a pivot.
+
+### Repeats needed, for a two-sided test at 95% with 80% power
+
+`n = 2 (2.8 s / d)²` per arm:
+
+| to resolve a difference of | in `rotate` yaw | in `straight` distance |
+|---|---|---|
+| 5% | 2 | 1 |
+| 2% | **10** | 2 |
+| 1% | **40** | 7 |
+
+**So `nav_test` needs about 10 runs per cell to call a 2% difference, and 40 for
+1%.** The existing `measurements/nav2.md` compares three Gazebo runs against two
+Isaac runs and reports a 4.5% spread in time-to-goal; at n = 3 that design can
+only resolve differences of roughly 5% and above, so its conclusion ("Nav2
+reaches the goal on both backends, in the same time") is supported for large
+effects and cannot exclude a small one.
+
+**Caveat.** These are `drive_test`'s open-loop numbers. `nav_test` closes the
+loop, and a controller both suppresses plant noise and adds its own, so the
+variance of a navigation metric has to be measured rather than inherited from
+here. The right reading of this table is "expect to need ~10, measure it".
+
