@@ -1588,3 +1588,121 @@ live one: the lidar and the state publisher are separate processes and neither
 noticed. **Check for `/odom`, not for `/scan`** — or better, run
 `ros2 run tf2_ros tf2_echo odom base_footprint`, which fails loudly and
 immediately on exactly this. It is in `docs/troubleshooting.md` now.
+
+## 2026-09-16 (last) — SLAM and navigation turn out not to be a choice
+
+### `world:=` stops having a default
+
+It defaulted to `turtlebot3_world`. So any command that forgot to say which room
+it was in silently became a run in that one. On a simulator that is merely
+wrong; on hardware it is worse, because the map loads, AMCL accepts it, and the
+robot localises confidently into a room it is not standing in. The registry's
+whole claim is that a world name defines a run, and that only holds if the name
+is stated. `world` now fails exactly the way `backend` already did.
+
+### The mode grid, and the assumption that nearly shipped
+
+The plan going in was three-way and exclusive: `slam` mode, `nav` mode, or
+neither, with `slam:=true nav:=true` rejected as nonsense. It was about to be
+built that way.
+
+It is not nonsense. slam_toolbox supplies `/map` and publishes `map -> odom`;
+the navigation stack consumes both and does not care which of slam_toolbox or
+AMCL produced them. The two flags are answering different questions:
+
+  slam    where does map->odom come from — slam_toolbox building a map, or
+          map_server and AMCL reading one recorded earlier
+  nav     does the navigation stack run
+
+Nothing excludes anything, so no combination has to be rejected, and the fourth
+cell is the interesting one: Nav2 planning over a map that slam_toolbox is
+still drawing.
+
+|  | `nav:=false` | `nav:=true` |
+|---|---|---|
+| `slam:=false` | robot only; teleop | `map_server` + AMCL + Nav2 |
+| `slam:=true`  | slam_toolbox + teleop | Nav2 while mapping |
+
+Both default false. Verified on gazebo by `ros2 node list`, all four cells:
+`slam:=true` runs no `amcl` and no `map_server`, and the combined cell runs
+`slam_toolbox` plus the entire navigation stack with neither of those two.
+
+The lesson is the repo's own working agreement, arriving from an unexpected
+direction. "Search before building" usually means *do not reinvent what
+upstream ships*. Here upstream's arrangement encoded a fact about the system —
+that localisation source and navigation stack are orthogonal — which the plan
+had not noticed. Reading `nav2_bringup/bringup_launch.py` closely enough to
+copy it was what made the better interface visible.
+
+### Dropping `bringup_launch.py`, and getting something back
+
+Because the two questions are independent, `nav2_bringup/bringup_launch.py` has
+nothing left to do: its entire job was to make `slam` choose between
+`slam_launch.py` and `localization_launch.py` with an
+`IfCondition(['not ', slam])`. So those two, and `navigation_launch.py`, are
+now included directly and the dispatch is flat — three lines, no negation.
+
+An unplanned consequence, and a good one. `localization_launch.py` and
+`navigation_launch.py` default `use_composition` to **False**, where
+`bringup_launch.py` defaults it True and creates the shared `nav2_container`
+itself. Nav2's nodes are therefore separate processes now. Slightly more
+overhead, and it retires the failure mode recorded in `docs/network.md` — the
+one where naming a DDS initial peer replaces the default locator list, the
+container starts, and no composable node is ever loaded into it while the
+launch sits there forever. There is no container to fail to fill any more.
+
+### `map:=` is deleted, not merely discouraged
+
+The roadmap said the SLAM map should be saved into the world directory rather
+than to `map_saver_cli`'s default. The stronger form is the right one: there is
+no `map:=` argument at all. A map named on the command line is a map that
+drifts away from the world it describes, which is the failure the registry
+exists to prevent. `world:=` is required, its map is `worlds/<name>/map/`, or it
+has not been made yet — and `slam:=true` is how it gets made.
+
+`scripts/save_map.py <world>` closes the loop. Run by hand in a second terminal
+while SLAM is still up, deliberately **not** automatic on shutdown: a
+half-finished or badly-closed run would then silently overwrite a good map, and
+a map is expensive to make. It refuses to replace an existing one without
+`--force`, and it adds the `map:` key to the manifest, because a map on disk
+that the manifest does not declare is invisible to every backend.
+
+### Two smaller things
+
+RViz moved out of the old `common/nav2.launch.py` into its own file and now
+runs in every mode, including none. That is what `backend:=real` with neither
+flag does instead of raising — it shows you the robot, its tf tree and its live
+scan, which is also the fastest way to see that a robot publishing `/scan` has
+no `odom` frame.
+
+slam_toolbox's parameters went into the existing `nav2_params.yaml` rather than
+a second file, because `nav2_bringup/slam_launch.py` checks whether the params
+file it is handed declares a `slam_toolbox` node and passes it through if so.
+One params file stays one params file. Upstream's **sync** defaults verbatim —
+`slam_launch.py` runs `online_sync_launch.py`, not the `online_async_launch.py`
+every tutorial reaches for — with the laser range narrowed to the LDS-01's
+0.12–3.5 m.
+
+### Two traps worth writing down
+
+**`pkill -f <pattern>` matches the shell that is running it.** A test harness
+written as `bash -c 'run() { ...; pkill -f nav2_; }'` has `nav2_` in its own
+command line, so the cleanup kills the harness. It looked like the first case
+passing and the rest silently not running. Put the script in a file, whose
+command line is just a path.
+
+**A leftover `gzserver` publishes `/odom` and makes a real-robot check pass
+against a simulator.** This was diagnosed the wrong way first: `/odom` appeared
+in `ros2 topic list` with nothing behind it, and the conclusion drawn was that
+topic presence is unreliable. It is unreliable, but the cause here was an
+orphaned simulator from an earlier test on the same DDS domain — the stale
+process trap already recorded in `docs/status.md`. `pgrep -af "gzserver|ros2
+launch|isaac-sim"` before believing anything, which that note already said.
+
+### Not done
+
+No map has been made end-to-end. SLAM launches on gazebo and produces the right
+node set, and `save_map.py`'s guards are exercised, but nothing has yet been
+driven round a room and saved. `docs/status.md` says so rather than claiming
+otherwise. `wait_for_robot` — a gate that would stop `backend:=real` from
+starting Nav2 against a robot that is not there — was proposed and is unbuilt.
