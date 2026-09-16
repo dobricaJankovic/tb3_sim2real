@@ -36,17 +36,19 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('world', help='registry name, or a path to a world directory')
-    ap.add_argument('--name', default='map',
-                    help='basename for map.yaml/map.pgm (default: map)')
+    ap.add_argument('--name', default=None,
+                    help='basename for map.yaml/map.pgm (default: the world '
+                        'name, so every world uses the same convention)')
     ap.add_argument('--topic', default='/map', help='occupancy grid topic')
     ap.add_argument('--force', action='store_true',
                     help='overwrite an existing map for this world')
     args = ap.parse_args()
 
     world = worlds.World.load(args.world)
+    name = args.name or world.name
     map_dir = os.path.join(world.dir, 'map')
-    stem = os.path.join(map_dir, args.name)
-    rel = os.path.join('map', args.name + '.yaml')
+    stem = os.path.join(map_dir, name)
+    rel = os.path.join('map', name + '.yaml')
 
     # A world's map is the artifact every backend shares and a cloned world's
     # map is the input it was made from, so replacing one silently is not a
@@ -77,7 +79,8 @@ def main():
     manifest = os.path.join(world.dir, 'world.yaml')
     with open(manifest) as f:
         text = f.read()
-    if world.manifest.get('map') != rel:
+    will_load = world.manifest.get('map') == rel
+    if not will_load:
         if 'map:' in text and world.manifest.get('map'):
             print(f'\nNOTE: {manifest} declares map: '
                   f'{world.manifest["map"]}, not {rel}. Left alone — edit it by '
@@ -87,10 +90,16 @@ def main():
                 f.write(f'\n# The Nav2 map of this environment, recorded by '
                         f'slam_toolbox via scripts/save_map.py.\nmap: {rel}\n')
             print(f'\n{manifest}: added map: {rel}')
+            will_load = True
 
-    print(f'\n{stem}.yaml\n{stem}.pgm\n\n'
-          f'    ros2 launch tb3_bringup bringup.launch.py '
-          f'backend:=<backend> world:={world.name} nav:=true')
+    print(f'\n{stem}.yaml\n{stem}.pgm')
+    if will_load:
+        print(f'\n    ros2 launch tb3_bringup bringup.launch.py '
+              f'backend:=<backend> world:={world.name} nav:=true')
+    else:
+        print(f'\nnav:=true world:={world.name} will still load '
+              f'{world.manifest["map"]}, not this map — edit {manifest} by '
+              f'hand first, or pass --force to replace the declared map.')
 
 
 if __name__ == '__main__':
