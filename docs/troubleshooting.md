@@ -195,3 +195,41 @@
   If you meet this on an older checkout, clear the stale segments with
   `sudo rm -f /dev/shm/carb-RStringInternals-* /dev/shm/sem.carb-RStringInternals-*`
   while no Kit process is running.
+
+- **`turtlebot3_node` dies and the launch carries on regardless.** Observed on
+  hardware 2026-09-16. `robot.launch.py` had been up for an hour and three
+  quarters; `ros2 topic list` still showed `/scan`, `/tf_static` and
+  `/robot_description`, `/scan` was still arriving at ~4.5 Hz, and the launch
+  process was still running. But `/odom` was gone and
+  `tf2_echo odom base_footprint` reported `Invalid frame ID "odom" ... frame
+  does not exist`, so the robot had silently stopped being drivable or
+  localisable. The robot *looks* alive because the lidar and the state
+  publisher are separate processes and neither noticed.
+
+  The evidence is in `~/.ros/log/<latest>/launch.log` on the robot, not on any
+  terminal you are likely to still have open:
+
+  ```
+  [ERROR] [turtlebot3_ros-3]: process has died [pid ..., exit code -6, ...]
+  ```
+
+  Exit code `-6` is `SIGABRT`. Restarting the node by hand shows what is behind
+  it:
+
+  ```
+  [ERROR] [DynamixelSDKWrapper]: Failed to read[[TxRxResult] There is no status packet!]
+  *** stack smashing detected ***: terminated
+  ```
+
+  The Dynamixels are not answering on the OpenCR's bus, and the read failure
+  walks off the end of a buffer instead of being handled. Two corroborating
+  signs that this is power and not software: `/dev/ttyACM0`'s mtime jumps to
+  the moment of death, meaning the OpenCR re-enumerated on USB rather than
+  merely erroring, and `/battery_state` never publishes because the sensor read
+  that would populate it is the one that fails. Charge the battery, power-cycle
+  the OpenCR, and re-run.
+
+  **Check `ros2 topic list` for `/odom`, not just for `/scan`,** before
+  believing a real-robot run is healthy — and prefer
+  `ros2 run tf2_ros tf2_echo odom base_footprint`, which fails loudly on
+  exactly this.

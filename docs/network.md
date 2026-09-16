@@ -94,19 +94,28 @@ ssh etfrobot@10.118.19.161
 ros2 launch turtlebot3_bringup robot.launch.py
 ```
 
-That publishes `/scan`, `/odom`, the URDF and tf. The workstation therefore runs
-only the consumer half, which is what `robot:=remote` means:
+That publishes `/scan`, `/odom`, the URDF and tf — the whole **robot layer**.
+The workstation therefore runs only the **workstation layer**, which is what
+`backend:=real` means and all it means:
 
 ```bash
 docker compose exec tb3_ros bash
-ros2 launch tb3_bringup bringup.launch.py backend:=real robot:=remote world:=<name>
+ros2 launch tb3_bringup bringup.launch.py backend:=real world:=<name>
 ```
 
-`robot:=remote` suppresses `common/state_publisher.launch.py` and the backend's
-drivers. Without it, `backend:=real` starts a second `robot_state_publisher`
-that fights the robot's over `/tf_static` and `/robot_description`, and starts
-drivers looking for USB devices attached to the other machine. It is rejected
-with the simulated backends, where it means nothing.
+There is no second argument to remember. `backend:=real` starts no local
+processes at all: no `common/state_publisher.launch.py`, no drivers. If it did,
+a second `robot_state_publisher` would fight the robot's over `/tf_static` and
+`/robot_description`, and the drivers would go looking for USB devices attached
+to the other machine.
+
+> This used to be `robot:=remote`, with a `robot:=local` that tethered the
+> OpenCR and the lidar to the workstation over USB. The flag is gone as of
+> 2026-09-16 — a robot that drives cannot be tethered, so `remote` was the only
+> value anyone ever passed. `ros2 launch` ignores unknown arguments silently, so
+> an old `robot:=remote` in a note or a shell history still works; it simply has
+> no effect. The tethered path is recorded as a comment in
+> `bringup.launch.py`, for the day an x86 SBC or a Jetson goes on the robot.
 
 The cost of this split is that the real backend's kinematic tree comes from the
 robot's own `turtlebot3_description`, not from this repository's URDF — so the

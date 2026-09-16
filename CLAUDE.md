@@ -83,8 +83,8 @@ Read the one doc your task needs, not the set:
   real room -> Nav2 map -> manifest -> both simulators, and what stops them
   drifting. This is the architectural core, not a reference appendix.
 - `docs/network.md` — reaching the real robot from the workstation when the
-  two are on different subnets, and the `robot:=remote` split that goes with
-  it. Read it the first time `ros2 topic list` comes back empty.
+  two are on different subnets, and the robot-layer / workstation-layer split
+  that goes with it. Read it the first time `ros2 topic list` comes back empty.
 - `docs/roadmap.md` — design decisions taken but not yet built, and the
   ordered next steps. Read before starting new work on the real robot.
 - `docs/troubleshooting.md` — failure modes that don't throw errors.

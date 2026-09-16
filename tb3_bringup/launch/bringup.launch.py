@@ -5,8 +5,20 @@
     ros2 launch tb3_bringup bringup.launch.py backend:=real
     ros2 launch tb3_bringup bringup.launch.py backend:=gazebo world:=/path/to/my_office
 
-`backend:=` is the only thing that changes between a simulated run and a real
-one. `world:=` names the ENVIRONMENT, not a file, and means the same thing
+A run is two layers, the way ROS already splits them:
+
+  robot layer        drivers, odometry, robot_state_publisher. Supplied by a
+                     simulator, or by the hardware itself.
+  workstation layer  map server, localization, Nav2, RViz. Identical
+                     everywhere; it does not know which robot it is driving.
+
+`backend:=` answers exactly one question — who provides the robot layer.
+`gazebo` and `isaacsim` start it here; `real` starts nothing here, because the
+robot is a second computer already running its own turtlebot3_bringup. That is
+why this file contributes no local processes for `backend:=real`: correct, not
+broken.
+
+`world:=` names the ENVIRONMENT, not a file, and means the same thing
 everywhere: the backend picks up whichever representation of it applies —
 gzserver loads its .world, Kit opens its .usd, and the real robot loads nothing
 because the environment is already around it. All three take the robot's start
@@ -62,19 +74,6 @@ def setup(context, *args, **kwargs):
     use_sim_time = 'false' if backend == 'real' else 'true'
     simulated = backend != 'real'
 
-    # `robot:=remote`: the robot is a second computer on the network running
-    # its own turtlebot3_bringup, which already publishes /scan, /odom, the
-    # URDF and tf. This machine then contributes only the consumer half. A
-    # robot_state_publisher started here would fight the robot's over
-    # /tf_static and /robot_description, and the drivers would go looking for
-    # USB devices attached to the other machine. If the two are on different
-    # subnets, discovery needs help as well: docs/network.md.
-    remote = LaunchConfiguration('robot').perform(context) == 'remote'
-    if remote and simulated:
-        raise RuntimeError(
-            'robot:=remote describes a real robot reached over the network; '
-            f'it cannot be combined with backend:={backend}.')
-
     world = worlds.World.load(LaunchConfiguration('world').perform(context))
 
     def inc(rel, **extra):
@@ -109,15 +108,42 @@ def setup(context, *args, **kwargs):
         if backend == 'isaacsim':
             backend_args['world_z'] = f'{world.isaac_world_z():g}'
 
-    # Same URDF drives the kinematic tree in all three worlds. Each backend
-    # only has to supply odom->base_footprint plus sensor topics. Both halves
-    # sit on the robot itself when it is remote.
-    actions = [] if remote else [
+    # The robot layer. Same URDF drives the kinematic tree in both simulated
+    # worlds; each backend only has to supply odom->base_footprint plus sensor
+    # topics on top of it.
+    #
+    # backend:=real supplies neither from here. The robot runs its own
+    # turtlebot3_bringup and already publishes /scan, /odom, the URDF and tf; a
+    # robot_state_publisher started here would fight the robot's over
+    # /tf_static and /robot_description, and drivers started here would go
+    # looking for USB devices attached to the other machine. If the two are on
+    # different subnets, discovery needs help as well: docs/network.md.
+    #
+    # The tethered alternative — OpenCR and lidar on this machine's USB, so the
+    # robot layer runs here too — is deliberately not an argument, because a
+    # robot that drives cannot be tethered. It comes back the day an x86 SBC or
+    # a Jetson goes on the robot, and the way back is to include upstream's
+    # turtlebot3_bringup/launch/robot.launch.py rather than to re-derive it.
+    # One thing that costs an hour if it is re-derived: turtlebot3_node
+    # declares `namespace` as a statically typed parameter with no default, so
+    # it must be passed as a PARAMETER and not merely as a frame prefix, or the
+    # process aborts before it opens the serial port with
+    # `Statically typed parameter 'namespace' must be initialized`.
+    actions = [] if backend == 'real' else [
         inc('common/state_publisher.launch.py'),
         inc(f'backends/{backend}.launch.py', **backend_args),
     ]
 
     if LaunchConfiguration('nav').perform(context) != 'true':
+        # Every local process this launch would start is in `actions`, and for
+        # backend:=real there are none — so nav:=false there leaves nothing at
+        # all to run. Say so rather than exiting silently with no output.
+        if not actions:
+            raise RuntimeError(
+                'backend:=real nav:=false starts nothing: the robot layer is '
+                'on the robot, and nav:=false switches off the workstation '
+                'layer this launch exists to provide.\n'
+                '  Use nav:=true here, or run teleop/drive_test directly.')
         return actions
 
     map_yaml = LaunchConfiguration('map').perform(context) or world.map()
@@ -166,12 +192,6 @@ def generate_launch_description():
             description='Environment: a registry name (worlds/<name>/) or a '
                         'path to a world directory. backend:=real uses it for '
                         'the map only.'),
-        DeclareLaunchArgument(
-            'robot', default_value='local',
-            description='local: this machine runs the robot drivers and the '
-                        'state publisher. remote: the robot is another '
-                        'computer running its own turtlebot3_bringup and this '
-                        'machine runs only Nav2 (backend:=real only).'),
         DeclareLaunchArgument(
             'nav', default_value='true',
             description='Also start the Nav2 stack'),

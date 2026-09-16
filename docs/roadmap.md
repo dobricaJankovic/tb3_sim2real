@@ -71,14 +71,78 @@ discontinuously, and a step mid-run invalidates tf caches on both sides.
 even when the campus network does not. Do this before trusting any real-robot
 measurement.
 
-Shape of it, not a tested recipe: `chrony` on both machines; on the workstation
-an `allow` line for the robot's subnet so it will answer time requests; on the
-Pi a `server <workstation-ip> iburst` line. What matters more than the exact
-config is the checking — `chronyc tracking` on the Pi should name the
-workstation as its source and report an offset in milliseconds, and
-`date +%s.%N` run on both should agree. `chronyc makestep` forces an immediate
-correction rather than waiting for chrony to slew, which is what you want after
-a boot rather than mid-run.
+### Measured state, 2026-09-16
+
+Neither machine has chrony. Both run `systemd-timesyncd`, and — this is the
+part that matters — **they sync to different upstreams**: the workstation to
+`ntp.ubuntu.com`, the Pi to `10.118.16.1`, a relay on its own Wi-Fi subnet.
+Two independently-disciplined clocks, never compared with each other.
+
+Near-simultaneous `date +%s.%N`, workstation minus robot: **+157 ms**, the
+workstation ahead. The Pi had been up ten days, so that is the *steady-state*
+offset, not the boot transient. 157 ms is most of an LDS-01 scan period
+(200 ms at 5 Hz) and is the same order as Nav2's usual `transform_tolerance`
+of 0.2-0.3 s — so it is already eating the margin the message filter needs,
+which is consistent with the dropped-scan line the hardware test logged.
+
+The Pi has **no `/dev/rtc*`** — confirmed, not assumed. It also has no
+`fake-hwclock` (Ubuntu Server 22.04 does not ship it, unlike Raspberry Pi OS),
+so there is not even a "last known good time" to boot into: the clock
+free-runs from whatever the hardware gives it and then jumps. Every reboot
+repeats this. It is steady-state behaviour for this hardware, not a one-time
+calibration.
+
+### The configuration
+
+`sudo apt install chrony` on both. The package stops and disables
+`systemd-timesyncd` itself — only one daemon may own the clock — and since
+neither machine has chrony yet, there is no existing conflict to unpick first.
+**`sudo` on the Pi requires a password**, so this is a step to run by hand, not
+something a script will do unattended.
+
+Workstation, appended to the stock `/etc/chrony/chrony.conf` (keep its pool
+lines; they are how it gets its own time):
+
+```
+allow 10.118.16.0/22   # answer time requests from the robot's subnet
+local stratum 10       # keep serving even when our own upstream is unreachable
+```
+
+`local stratum 10` is the fallback-authority idiom: chrony only falls back to
+it when it has nothing better, so it never overrides real upstream sync. Without
+it, a workstation that has lost the campus network refuses to serve the robot
+at all — which is precisely the lab-with-no-internet case.
+
+Pi, in its `/etc/chrony/chrony.conf`:
+
+```
+server 10.118.5.241 iburst prefer
+```
+
+`iburst` for a fast first sync, which matters with no RTC; `prefer` so the
+selection algorithm tracks the workstation specifically rather than averaging
+it with a pool source. Keep Ubuntu's stock `makestep 1.0 3` line: it lets
+chrony *step* the clock for the first three updates if the offset exceeds a
+second, instead of slewing. That is exactly right for a just-booted RTC-less
+Pi — take the big jump once, immediately, before anything is launched.
+(`initstepslew` is an `ntpd` directive and does not exist in chrony;
+`makestep` is the whole story. `rtcsync` in the stock file is dead weight here
+with no RTC, harmless either way.)
+
+Unchecked: whether `ufw` is active on the workstation. If it is, NTP needs
+`sudo ufw allow from 10.118.16.0/22 to any port 123 proto udp`.
+
+### Checking it
+
+What matters more than the config is the checking. On the Pi, `chronyc
+tracking` should name the workstation as `Reference ID` and `chronyc sources -v`
+should mark that line `*`, not `+` or `?`. `chronyc clients` on the workstation
+should list the robot once it has polled. Then the check that depends on
+neither daemon's self-report: `date +%s.%N` on both, as close together as you
+can manage. **Aim for single- to low-double-digit milliseconds**, not the
+present 157. `chronyc makestep` forces an immediate correction rather than
+waiting for chrony to slew, which is what you want after a boot rather than
+mid-run.
 
 Two things to be careful about. The offset right after the Pi boots is the
 interesting one, since that is when experiments start — check it then, not
@@ -113,9 +177,26 @@ to the sim-to-real gap.
 
 **Decided: slam_toolbox**, not the Cartographer that the TurtleBot3 docs use.
 It is what `nav2_bringup/slam_launch.py` itself runs, so `slam:=true` becomes
-an include of upstream's own launch rather than a parallel arrangement, and it
-is a lifecycle node — it comes up under Nav2's lifecycle manager instead of
-sitting outside it the way Cartographer would.
+an include of upstream's own launch rather than a parallel arrangement.
+
+*The second half of that reasoning was wrong and is corrected here, 2026-09-16.*
+It said slam_toolbox is a lifecycle node that comes up under Nav2's lifecycle
+manager. On Humble it is not. `async_slam_toolbox_node` is built on plain
+`rclcpp::Node` — no `LifecycleNode`, no `use_lifecycle_manager` parameter
+anywhere in the package — and `slam_launch.py` sets `lifecycle_nodes =
+['map_saver']`, so the only thing its `lifecycle_manager_slam` governs is
+`map_saver_server`. slam_toolbox self-activates on construction and manages
+itself. This does not change the decision — being upstream's own choice is
+reason enough — but nothing should be built expecting a lifecycle transition
+that will never arrive.
+
+Two more facts worth having before starting. `nav2_bringup/slam_launch.py`
+includes slam_toolbox's **`online_sync_launch.py`**, the *sync* node, not the
+`online_async_launch.py` that most tutorials reach for. And `bringup_launch.py`
+already does the switch this wants, as `IfCondition(slam)` against
+`IfCondition(PythonExpression(['not ', slam]))` — so the minimal change is to
+declare `slam` in `common/nav2.launch.py` and forward it into the existing
+include, letting upstream fork, rather than arranging anything here.
 
 **Decided: the map is saved into `worlds/<name>/map.yaml`, never to
 `map_saver_cli`'s default.** A map that lands in the working directory is a map
@@ -123,6 +204,16 @@ that drifts away from the world it describes, which is the failure the registry
 exists to prevent. `map_saver_cli` is manual by nature, so this wants a thin
 wrapper that takes a world name and writes into its directory — closing the
 loop from SLAM to manifest to all three backends.
+
+Two ways to write the file, both present on Humble:
+`ros2 run nav2_map_server map_saver_cli -f worlds/<name>/map`, which subscribes
+to `/map` once and works for any publisher; or `ros2 service call
+/slam_toolbox/save_map slam_toolbox/srv/SaveMap "{name: {data: '...'}}"`, which
+asks slam_toolbox directly and so cannot race the `/map` subscription. Prefer
+`map_saver_cli`: it is the same tool a geometric map from `make_map.py` would
+use, so there is one way to write a `map.yaml` rather than two. (Note
+`/slam_toolbox/save_map` and friends are hardcoded absolute service names, not
+derived from the node name — renaming the node would not move them.)
 
 **Caveat on the three-map comparison above:** it assumes the manifest is
 authored to match the real room, so that `make_map.py` yields ground truth. The
@@ -154,7 +245,7 @@ directly on the robot instead of `robot.launch.py`, leaving the container's
 the robot means static transforms do not cross the network, and the robot stays
 independently useful. Better arrangement, not a compromise.
 
-## 5. Drop `robot:=local|remote`, keep the concept
+## 5. Drop `robot:=local|remote`, keep the concept — **done, 2026-09-16**
 
 Always remote for a robot that drives; `local` needs the OpenCR and lidar
 tethered by USB to the workstation, which cannot happen while it is mobile.
@@ -169,11 +260,27 @@ no local processes reads as correct rather than broken.
 Keep the tethered-USB path as a comment, not an argument. It comes back the day
 an x86 SBC or a Jetson goes on the robot.
 
+**Built.** The `robot` argument is gone; `backends/real.launch.py` is deleted
+rather than left unreferenced, because an unreferenced backend file is exactly
+the thing that goes stale. Its one piece of hard-won knowledge — that
+`turtlebot3_node` declares `namespace` as a statically typed parameter with no
+default and aborts before opening the serial port without it — is preserved in
+the comment in `bringup.launch.py` that records how to bring the tethered path
+back: include upstream's `robot.launch.py`, do not re-derive it.
+
+One consequence, and it is the reason section 3's error was worth writing now:
+`backend:=real` contributes no local processes, so `backend:=real nav:=false`
+starts *nothing*. It now raises instead of exiting silently. `ros2 launch`
+ignores unknown arguments, so a stale `robot:=remote` in someone's shell history
+is inert rather than an error.
+
 ## Next steps, in order
 
 1. **chrony on both machines.** Cheap, and it removes a whole class of ghost
-   failure. Prerequisite for trusting any hardware measurement. *Started
-   2026-09-16.*
+   failure. Prerequisite for trusting any hardware measurement. *Surveyed
+   2026-09-16 — the offset is measured and the config is written out in
+   section 2; what remains is `apt install` and editing two files, both of
+   which need a sudo password on the Pi.*
 2. **A systemd unit on the Pi** running `robot.launch.py` at boot. Deletes
    HDMI, password and SSH from the workflow: power on, wait, it publishes.
 3. **`set_initial_pose` from the manifest**, replacing the `/initialpose`
