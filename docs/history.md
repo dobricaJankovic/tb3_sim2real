@@ -1271,3 +1271,127 @@ reset, and costs a 1.5 s rebuild of `/ws/install`.
 **The measurement lesson is the same one as the mesh cache, one layer up: a
 result taken on a dirty environment is not a result.** Two write-ups today
 blamed the system under test for state the test itself left behind.
+
+---
+
+## 2026-09-15/16 — colour, props, and measuring the two simulators against each other
+
+### isaacsim_bringup moved to 6.1.0
+
+The pin sat at `IsaacSim-6.0.1` while `/isaac-sim` is 6.1.0, because the 6.1.0
+tag migrated every repo-owned launch file from Python to XML and
+`turtlebot3_isaacsim` included `run_isaacsim.launch.py` by name. Fixed where it
+belonged — in that package, with `AnyLaunchDescriptionSource` and the new
+filename — so the pin could follow the simulator. Its `UPSTREAM.md` had already
+documented the rename; only the code lagged. **Committed there, not pushed.**
+
+### Isaac rendered everything grey, and Gazebo was wrong too
+
+The manifest's only statement about colour was `Gazebo/White` — an **Ogre
+material script name**. It means something to Gazebo and nothing to anything
+else, so the USD generator had `ignore_materials=False` set faithfully and
+nothing to apply it to. Colour is now data: `worlds.PALETTE` resolves the stock
+names to the RGB in Gazebo 11's own `gazebo.material`, and each generator writes
+its own dialect.
+
+Fixing it surfaced a second bug. Upstream's `model.sdf` paints the wall
+`Gazebo/FlatBlack` and the five hexagons `Gazebo/Green`; the manifest had
+dropped both when it was derived, so all 15 bodies defaulted to white.
+**Gazebo had been rendering `turtlebot3_world` wrong as well.**
+
+Lesson worth keeping: a check that proves two files came from one source says
+nothing about whether either is *right*. Provenance, bounds, collider counts and
+the footprint test all passed on a stage that rendered entirely grey.
+
+### dae_to_obj silently produced broken geometry
+
+It read `library_geometries` directly and only *warned* that a visual-scene
+`<matrix>` was being ignored. On `gazebo_models`' `cafe_table.dae` that puts the
+tabletop at z = 0.00-0.04 m — flat on the floor — while the overall height comes
+out 0.737 m against a correct 0.775 m. **A 38 mm difference in the bounding
+box**, which is to say the manifest's `verify` block would have passed it.
+
+Now the visual scene is walked properly. Upstream's two meshes carry no node
+transforms and re-convert byte-for-byte identical, which is what made the change
+safe to make.
+
+The general shape of this bug is worth remembering: *structurally wrong,
+dimensionally plausible*. It is the failure mode a bounds check cannot catch,
+and the reason a bounds check is not sufficient on its own.
+
+### small_office
+
+A room anyone can write (five boxes and a partition) furnished with things
+nobody can write as boxes (seven mesh props). Props are AWS RoboMaker's
+small-house meshes under **MIT-0** — chosen over `osrf/gazebo_models` because
+that is CC-BY *and has no chair at all*. Its `bookshelf`, `cabinet` and `table`
+turn out to be pure SDF box assemblies, which is a useful thing to know: if you
+only need a shelf, transcribe the boxes and skip the mesh pipeline entirely.
+
+`scripts/make_map.py` writes a Nav2 map from a manifest, for a world that was
+designed rather than cloned. Deliberately the narrow case — on a world with a
+real counterpart it would make the footprint check compare the model with a
+picture of itself.
+
+### One instrument, not one per backend
+
+`ros2 run tb3_bringup drive_test` publishes an identical open-loop sequence and
+reads `/odom`, so it runs unchanged on all three backends.
+
+**It had a bug that would have produced a convincing wrong answer.** `ros2 run`
+does not set `use_sim_time`, so phases were timed on the wall clock while the
+robot moved in sim time. Gazebo at RTF 1.0 hides that completely; Isaac at 0.95
+does not, and `expected_distance` is computed from the same wall seconds. The
+first four runs were discarded. It now detects a `/clock` publisher and switches
+itself, which also keeps it correct on the real robot, where wall time is right.
+
+### What the measurements found
+
+**Isaac Sim under-rotates by 30%** at `wz = 0.5` and **52%** at `wz = 0.2`,
+while linear motion is within 5%. Not slip — slipping wheels read *above* target,
+free-spinning; these read below. A sweep settles the mechanism: tracking goes
+47.8 / 73.1 / 83.3 / 88.3 % as the rate rises, while the *absolute* error stays
+near-constant at 0.25-0.43 rad/s. With `stiffness = 0`,
+`D * (w_target - w_actual) = tau`, so a fixed friction torque gives exactly a
+constant offset. A units error would hold the ratio fixed; a velocity cap would
+make high speed worse. Both excluded. The gain is the one `turtlebot3_isaacsim`
+already marks `# TODO unverified gain`.
+
+**Nav2 hides it almost entirely.** Five goal runs all SUCCEEDED, 22.16-23.16 s,
+paths within 2.4%. A pure 180-degree rotation is 4.46 s on Gazebo and 4.56 s on
+Isaac — and Isaac's residual yaw error is the *smaller*, 0.110 against 0.261 rad.
+The loop closes on yaw error, so a plant delivering 70% just gets commanded
+longer. The defect relocates rather than disappears: it matters for open loop,
+dead reckoning, and above all for tuning gains against Isaac and expecting them
+to transfer.
+
+**Contact is where the two are genuinely not interchangeable.** Driven into the
+table and held there, Gazebo deflects off the leg and pivots 90 degrees around
+it, still moving 0.085 m and 3.1 rad during a phase commanding zero, and
+recovers only 29% of a commanded reverse. Isaac stops dead and square —
+0.0001 rad of yaw, an exact standstill, a clean 91% reverse, no contact impulse.
+Neither is wrong; a real burger does deflect, so Gazebo is the more lifelike and
+Isaac the more repeatable.
+
+Good news: **neither invents odometry.** Isaac's odom path equals its
+displacement to 1.7 mm; Gazebo's excess is the pivot arc it really travelled.
+Blocked wheels are resisted in both, so Nav2 is never fed unbounded phantom
+distance.
+
+**The backends disagree about where `/odom`'s origin is.** Gazebo's first sample
+at the spawn reads the world pose `(-1.4999, -1.5000)`; Isaac's reads zero. The
+real `turtlebot3_node` starts at zero wherever it is switched on, so **Isaac
+matches the real robot and Gazebo does not.** It breaks nothing — `odom` need
+only be continuous, and AMCL absorbs the offset — but raw `/odom` positions are
+not comparable between backends. Cause is upstream: `turtlebot3_gazebo`'s
+`model.sdf` sets no `<odometry_source>`. Recorded rather than patched, because
+overriding it means carrying our own copy of upstream's model.
+
+### Stale numbers rot quietly
+
+`worlds/README.md` claimed a mirrored map scores 22% / 80%. Re-measured: 27% /
+27% about x, 31% / 24% about y. The old spurious figure predated the change that
+stopped counting model cells in *unknown* space — the very fix that lowered it —
+and nothing re-checked it. Also worth writing down: both mirrors fail on
+**coverage**, not contradiction, because this arena is nearly symmetric. A doc
+implying otherwise sends the next person to tune the wrong threshold.
