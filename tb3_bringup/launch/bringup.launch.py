@@ -115,6 +115,13 @@ def setup(context, *args, **kwargs):
                                  else world.isaac_usd())
         if backend == 'isaacsim':
             backend_args['world_z'] = f'{world.isaac_world_z():g}'
+            # Empty means "whatever the backend defaults to". The number and
+            # the reasoning for it live in backends/isaacsim.launch.py; a
+            # default repeated here would be a second copy of it, free to
+            # drift. Forwarding '' would override that default with nothing.
+            physics_hz = LaunchConfiguration('physics_hz').perform(context)
+            if physics_hz:
+                backend_args['physics_hz'] = physics_hz
 
     # The robot layer. Same URDF drives the kinematic tree in both simulated
     # worlds; each backend only has to supply odom->base_footprint plus sensor
@@ -218,5 +225,14 @@ def generate_launch_description():
             'headless', default_value='false',
             description='Run the simulator with no window (ignored by '
                         'backend:=real)'),
+        DeclareLaunchArgument(
+            # Not a tuning knob: below the backend's default the wheels
+            # chatter against the ground rather than tracking their command,
+            # which is measured in docs/worknotes/2026-09-17-lane-a-physics.md.
+            # It is an argument at all so that cost can be traded against
+            # fidelity in a measurement, and so the rate is recorded with one.
+            'physics_hz', default_value='',
+            description='PhysX sub-steps per second, backend:=isaacsim only. '
+                        'Empty uses the backend default.'),
         OpaqueFunction(function=setup),
     ])
