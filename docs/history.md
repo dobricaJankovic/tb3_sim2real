@@ -1706,3 +1706,93 @@ node set, and `save_map.py`'s guards are exercised, but nothing has yet been
 driven round a room and saved. `docs/status.md` says so rather than claiming
 otherwise. `wait_for_robot` — a gate that would stop `backend:=real` from
 starting Nav2 against a robot that is not there — was proposed and is unbuilt.
+
+## 2026-09-17 — Isaac Sim's wheels chatter; the gain was never the problem
+
+An overnight run in three lanes against
+`docs/worknotes/2026-09-16-overnight-brief.md`, plus a finishing pass. Full
+numbers in `docs/worknotes/2026-09-17-lane-a-physics.md`; this is the short
+version and the ideas worth keeping.
+
+### The falsification criterion earned its place in the brief
+
+The brief named one hypothesis as most likely — the wheel drive is
+damping-limited, raise the gain, NVIDIA's own tutorial says `1.0e7` against the
+`1.0e5` in `import_turtlebot3.py` — and then wrote down what would kill it:
+`err * D` must stay constant across a 100x change in `D`.
+
+It was swept 10,000x. **The error did not move.** `err * D` spans 76 to
+3.6e6 N·m, against a Dynamixel's ~1.4 N·m stall. The tutorial's value would
+have changed nothing measurable.
+
+The lesson is not about gains. Without that criterion written down *in advance*,
+the obvious move was to raise the gain until the symptom moved — and with a
+noisy signal something always moves. A stated falsification test is what turns
+an overnight agent from a plausible-story generator into an instrument.
+
+### The mean was hiding the signal
+
+Everything on record since 2026-09-15 measured means. The wheel commanded a
+steady −1.2121 rad/s actually ranges over **−2.91 to +1.04 rad/s** and reverses
+direction; "73% of commanded" was the average of an oscillation. Gazebo's
+standard deviation on the same phase is 0.0000.
+
+A chatter-induced bias is set by the oscillation amplitude and so barely
+depends on the commanded rate — which reads *exactly* like `tau / D` in a table
+of means. The original inference was sound given the data; the data was missing
+one column. **Record the spread, not only the mean.**
+
+### The decisive test was one no ROS-level measurement could run
+
+Lift the robot off the ground: error 0.0000 in every mode, at every rate,
+tracking ratio 1.0000. The drive is not weak, saturated, mistuned or
+miscommanded — the entire deficit is created by the contact solve, which is why
+four decades of gain did nothing. Reaching past the ROS interface into the
+simulator is sometimes the only way to split a hypothesis.
+
+### The cause is the wheel's collision shape
+
+The wheels are `UsdGeom.Cylinder`, and neither PhysX nor MuJoCo rolls a
+cylinder exactly — a faceted wheel bumps. A sphere of the same radius cuts the
+chatter **40x at the original timestep**. The two effects separate cleanly: the
+cylinder causes the chatter, the timestep causes the common-mode error, and
+together they meet the whole acceptance matrix inside 0.54%.
+
+Shipped instead: physics at 480 Hz (RTF 0.68, `/clock` unchanged at 41 Hz,
+since these are PhysX sub-steps within a frame). Translation now meets 1% at
+every speed; rotation reaches 88% and does **not** meet it. The collider was
+deliberately left alone — a sphere is not a tyre, it contacts at a point, and
+changing how the robot touches the world in every future measurement is not a
+3 a.m. decision.
+
+### Neither simulator models the actuator faithfully
+
+Gazebo's `sd = 0.0000` is not accuracy, it is *exactness*:
+`gazebo_ros_diff_drive` is an ideal velocity source with a force cap, and with
+`mu = 1e5` its wheels cannot slip either. Isaac's are torque-driven, dynamic,
+and currently unstable. **They fail in opposite directions**, and that is a
+sharper statement of where the sim-to-real gap lives than "Isaac
+under-rotates" — it does not depend on fixing anything.
+
+### The robot is not in the manifest
+
+`check_worlds.py` proves the *world* is identical across backends by
+construction. The robot is not: wheel friction is `mu = 1e5` in
+`turtlebot3_gazebo` and `1.0` in `turtlebot3_isaacsim`, authored independently
+in two packages with nothing comparing them. A divergence there damages a
+comparison exactly as much as a divergence in the world would, and is the same
+class of hole as a map that carries no provenance.
+
+### Also this session
+
+The three-mode interface landed (`nav`, `slam`, bare) and is now pinned by
+`tb3_bringup/test/test_launch_modes.py` — 10 cases, no simulator, 0.15 s,
+asserting which launch files each mode includes rather than that the
+description builds. `params_file()` is gone: per-backend Nav2 tuning would
+absorb the very gap being measured. `turtlebot3_isaacsim` grew `humble` and
+`jazzy` branches, a smoke test, and a `runtime/` split; the smoke test found a
+real `SCAN_OFFSET` bug on waffle on its first run.
+
+`measurements/isaac_angular_deficit.md`, `docs/status.md` and `CLAUDE.md` all
+still named the gain and have been retracted in place. The measurements are
+kept — they are correct and they reproduce — and now say what they meant.
