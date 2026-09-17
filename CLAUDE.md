@@ -77,10 +77,18 @@ resolved through `worlds.PALETTE` and written by each generator in its own
 dialect. `Gazebo/White` alone is an Ogre token that only Gazebo can read, and
 while that was all the manifest carried, every Isaac Sim stage rendered grey.
 
-**Isaac Sim currently under-rotates**, by 30% at `wz = 0.5` and 52% at
-`wz = 0.2`. It is a wheel-drive gain in `turtlebot3_isaacsim`, diagnosed in
-`measurements/isaac_angular_deficit.md`. Do not treat an Isaac angular result as
-ground truth until that is fixed.
+**Isaac Sim's wheels chatter against the ground rather than tracking their
+command.** What was recorded as "under-rotates by 30%" is the *mean of an
+oscillating signal*: commanded a steady -1.2121 rad/s the wheel ranges over
+-2.91 to +1.04 and reverses direction. It is not a drive gain — the damping was
+swept 10,000x with no measurable effect — it is the contact solve, and the
+source is the cylindrical wheel collider, which no solver here rolls exactly.
+Running physics at 480 Hz (now the `turtlebot3_isaacsim` default) fixes
+translation to within 1% and takes rotation to 88% of command; spherical wheel
+colliders fix both, and that decision is open. Measured in
+`docs/worknotes/2026-09-17-lane-a-physics.md`. **Do not treat an Isaac angular
+result at low `wz` as ground truth**, and do not compare an Isaac measurement
+with one taken before 2026-09-17 without checking the physics rate it ran at.
 
 ## Where to look
 

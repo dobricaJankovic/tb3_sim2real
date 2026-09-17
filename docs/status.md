@@ -34,20 +34,34 @@ sequence, two runs per backend. Phases are timed on the **simulator's** clock.
 - Isaac veers on the straight (-0.0085 / -0.0158 rad of yaw) where Gazebo holds
   0.00000 exactly.
 
-### The one real defect: Isaac Sim under-rotates
+### The one real defect: Isaac Sim's wheels chatter
 
-Full write-up with the sweep that diagnoses it:
+**Superseded 2026-09-17.** The measurements below are correct and reproduce;
+the diagnosis that followed them was wrong. Full write-up:
+[`docs/worknotes/2026-09-17-lane-a-physics.md`](worknotes/2026-09-17-lane-a-physics.md),
+which supersedes
 [`measurements/isaac_angular_deficit.md`](../measurements/isaac_angular_deficit.md).
 
-Short version: the wheels reach only 73% of the commanded joint velocity at
-`wz = 0.5` and **48% at `wz = 0.2`**, while the absolute error stays constant at
-0.25-0.43 rad/s. That is a fixed friction torque against a finite-gain velocity
-drive, not a kinematics or units error. The gain is the one
-`turtlebot3_isaacsim` already marks `# TODO unverified gain`. **The fix belongs
-in that package**, which owns the asset, the gains and the physics materials.
+The wheels reach only 73% of the commanded joint velocity at `wz = 0.5` and
+**48% at `wz = 0.2`**. That was read as a fixed friction torque against a
+finite-gain velocity drive. It is not: **the drive damping was swept 10,000x
+(1e3 to 1e7) and the error did not move**, so the number
+`turtlebot3_isaacsim` marks `# TODO unverified gain` is not wrong, it is
+irrelevant.
 
-It is worst at low rates, which is Nav2's regime for final alignment and
-in-place turns.
+What those means were hiding is an oscillation. Commanded a steady -1.2121
+rad/s the left wheel ranges over **-2.91 to +1.04 rad/s** and reverses
+direction; 73% is its average. Gazebo's standard deviation on the same phase is
+0.0000. Lift the robot off the ground and Isaac reproduces every commanded rate
+**exactly**, so the whole deficit is created by the contact solve — and the
+source is the wheel's cylindrical collider, which neither PhysX nor MuJoCo
+rolls exactly. A sphere of the same radius cuts the chatter 40x at the original
+timestep.
+
+Running PhysX at 480 Hz is shipped and fixes translation to within 1% at every
+speed; rotation improves from 48% to 88% at the worst point but does **not**
+meet the 1% target. Low rates are still the worst case, which is Nav2's regime
+for final alignment and in-place turns.
 
 ### Materials, and a fidelity bug in Gazebo too
 
