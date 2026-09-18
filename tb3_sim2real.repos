@@ -8,10 +8,25 @@
 # would be a second source of truth for the Isaac Sim side, which is exactly the
 # thing this repository exists to prevent.
 repositories:
+  # `humble`, the development branch, and NOT a feature branch. This pinned
+  # `fix-map-mirroring-add-small-worlds` until 2026-09-18, which had been
+  # abandoned on 2026-09-15 and was eight commits behind by then. That is not a
+  # cosmetic drift: the pinned branch has no nodes/wheel_odometry.py at all and
+  # defaults physics_hz to 60.0, so `scripts/workspace.sh` on a fresh machine
+  # silently restored BOTH of the defects this repository had just measured
+  # away -- Isaac's /odom back to the chassis prim (the true pose, which drifts
+  # nowhere and makes AMCL's job unreal) and the wheels back to chattering
+  # against the ground. Nothing errors; the numbers just quietly stop matching
+  # docs/status.md.
+  #
+  # So: pin the branch that is actually developed and pushed. If a run ever has
+  # to be reproduced exactly, pin the commit instead of the branch --
+  # 4231fbf is the tip as of 2026-09-18, the one every measurement from that
+  # day was taken against.
   turtlebot3_isaacsim:
     type: git
     url: git@github.com:dobrica-jankovic/turtlebot3_isaacsim.git
-    version: fix-map-mirroring-add-small-worlds
+    version: humble
 
   # NVIDIA ships isaacsim_bringup as source only, inside a repository that also
   # holds eight other example packages, twice over (humble_ws and jazzy_ws).
