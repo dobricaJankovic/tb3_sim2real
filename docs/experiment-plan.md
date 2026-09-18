@@ -21,6 +21,12 @@ being fixed are at the bottom, so they are not reopened.
 
 No dependencies between these; take them in any order except A0.
 
+**Worked through on 2026-09-18. A0-A5 and A7 are done; A6 is surveyed and
+waits only on a sudo password.** Each item below records what it found, and two
+of them found the plan wrong: `RewrittenYaml` cannot create absent keys (B5),
+and `/imu` comes from Gazebo rather than Isaac Sim (A2). Section B is untouched
+and still needs the robot.
+
 ## A0. The `.repos` pin — **fixed 2026-09-18, listed so it is not undone**
 
 `tb3_sim2real.repos` pinned `turtlebot3_isaacsim` to
@@ -39,30 +45,18 @@ git -C src/turtlebot3_isaacsim log -1 --oneline
 test -f src/turtlebot3_isaacsim/nodes/wheel_odometry.py && echo "wheel odom present"
 ```
 
-## A1. Verify Gazebo actually publishes `/ground_truth/odom` — **do this first**
+## A1. Verify Gazebo actually publishes `/ground_truth/odom` — **PASSED 2026-09-18**
 
-**The one unverified thing in the whole chain.** Isaac Sim's ground truth is
-proven by a recorded run (`measurements/2026-09-18_isaacsim_wheel_odom.json`
-carries `truth_d` rows). **Gazebo's never has been** — every Gazebo
-`drive_test` file predates the P3D plugin and has no ground-truth rows, so the
-plugin in `launch/backends/gazebo.launch.py` has been written and never
-exercised.
+It attaches. `ros2 topic hz` reads **49.986 Hz** against the plugin's
+`update_rate: 50.0`, `frame_id: world`, `child_frame_id: base_footprint`, and a
+full `drive_test` reports `ground_truth: /ground_truth/odom` with a non-null
+`truth_d` on every phase. Recorded:
+`measurements/2026-09-18_gazebo_ground_truth.json`.
 
-The failure mode is silent, and that file's own comment names it: a plugin
-loaded the wrong way "is accepted and silently never attaches". If P3D is not
-attaching, the **wheel → body** layer — slip, the whole point of experiment 1 —
-cannot be measured on Gazebo at all.
-
-```bash
-ros2 launch tb3_bringup bringup.launch.py backend:=gazebo world:=empty_stage headless:=true
-ros2 topic hz /ground_truth/odom                 # want ~50 Hz
-ros2 run tb3_bringup drive_test --ros-args -p label:=gt_check -p out:=/tmp/gt.json
-python3 -c "import json;d=json.load(open('/tmp/gt.json'));print(d['ground_truth']);
-print([p.get('truth_d') for p in d['sequence']])"
-```
-
-Pass = `ground_truth: /ground_truth/odom` and non-null `truth_d`. If it fails,
-fix it before anything else here.
+The wheel → body layer on Gazebo exists and reads **+0.06% / −0.55% / +0.16%**
+across pivot, arc and straight — no measurable slip, which is what `mu = 100000`
+predicts and what Isaac's −7.1% pivot slip now has to be compared against.
+Numbers and the wording that goes with them: `docs/status.md`.
 
 **Both simulators do have true position and no new node is needed** — Gazebo
 from a P3D plugin injected into a temp copy of the robot SDF, Isaac from the
@@ -71,29 +65,36 @@ from a P3D plugin injected into a temp copy of the robot SDF, Isaac from the
 hardware the topic does not exist and cannot; that layer gets measured by hand
 in the lab instead.
 
-## A2. `drive_test` must record a rosbag
+## A2. `drive_test` must record a rosbag — **done 2026-09-18**
 
-Experiment 1 is "drive and record rosbags", and only `nav_test` records one
-(`tb3_bringup/tb3_bringup/nav_test.py:299`). The JSON summary is derived; the
-bag is the raw data, and a metric nobody thought of tonight is only recoverable
-from a bag.
-
-Lift `start_bag()` into a shared helper and give `drive_test` the same
-`bag_dir` parameter. Topics for the open-loop run:
+`tb3_bringup/recording.py` holds the recorder, `drive_test` and `nav_test` both
+take `bag_dir:=`, and the topic lists live there rather than in either
+instrument. The open-loop list:
 
 ```
-/odom  /cmd_vel  /joint_states  /tf  /tf_static  /imu  /clock  /ground_truth/odom
+/odom  /cmd_vel  /joint_states  /tf  /tf_static  /imu  /clock
+/ground_truth/odom  /battery_state
 ```
 
-`/clock` and `/ground_truth/odom` simply produce nothing on hardware, which is
-correct and is how the bag records which backend it came from.
+Not every backend publishes all of them, and that is deliberate: rosbag2
+records nothing for a topic that never appears, so the absence is how the bag
+says which backend wrote it. Measured 2026-09-18, correcting an assumption in
+this plan: `/imu` is published by **Gazebo** and the real robot, and **not by
+Isaac Sim** — the reverse of what was written here. `/clock` and
+`/ground_truth/odom` are the two simulators'; `/battery_state` is the robot's.
 
-**Write bags somewhere that does not leave root-owned files in the repo.**
-`ros2 bag record` runs as root inside the container, and the existing
-`measurements/bags/` is root-owned — which blocked a git merge on 2026-09-18
-and could not be cleaned from the host. Either write outside the bind mount and
-copy in, or `chown` after. `docker-compose.yml`'s `ros_logs` comment is the
-precedent.
+**Root-owned files are handled rather than avoided**, and for more than bags.
+`recording.give_back()` chowns a written path to whoever owns the directory it
+landed in, so anything an instrument writes into the bind mount comes out owned
+by the host user. Verified on a 3.9 MB bag of a full `default` sequence — eight
+topics, 11622 messages, `etfrobot:etfrobot`.
+
+This item said "bags"; the JSON summaries and the `.samples.json` traces beside
+them are written by the same root process into the same mount and had the same
+problem — every such file already in `measurements/` was `root:root`. All three
+instruments now call `give_back()` on every file they write, and the ones
+already on disk were chowned back. `measurements/bags/` and `*.beams.json` are
+gitignored, like `*.samples.json`.
 
 **On `/battery_state` (real robot only):** a *control*, not a measurement. The
 OpenCR tracks a commanded wheel velocity less well as the pack drains, so a run
@@ -101,38 +102,55 @@ at the end of a session may not be comparable with one from the start — and
 without the voltage in the bag there is no way to find that out afterwards. One
 topic. Drop it if the analysis shows no effect.
 
-## A3. RViz must use the simulator's clock
+## A3. RViz must use the simulator's clock — **done 2026-09-18**
 
-`launch/common/rviz.launch.py` declares `use_sim_time` and never forwards it,
-and `nav2_bringup/rviz_launch.py` has no argument to receive it. RViz therefore
-runs on wall time in both simulators and emits tf message-filter warnings.
+`launch/common/rviz.launch.py` now runs `rviz2` as a plain `Node` with
+`parameters=[{'use_sim_time': ...}]` instead of wrapping
+`nav2_bringup/rviz_launch.py`, which declares no such argument and could not
+receive it. Upstream's one other contribution — shutting the launch down when
+the window closes — is kept.
 
-Cosmetic alone — but the warning text is **identical** to the one real
-Pi/workstation clock skew produces (B1), so leaving it will actively confuse
-that diagnosis. Fix: run `rviz2` as a plain `Node` with
-`parameters=[{'use_sim_time': ...}]`.
+Verified against a running Gazebo: `ros2 param get /rviz2 use_sim_time` →
+**True**, and the log's tf lines now carry *simulated* stamps (`at time 76.601`,
+not a wall epoch). The skew-lookalike reason string — `the timestamp on the
+message is earlier than all the data in the transform cache` — is **gone, 0
+occurrences**. What remains is `discarding message because the queue is full`,
+a different and benign reason, which is exactly the distinction that had to
+survive: B1's diagnosis reads the reason string, and it now has only one
+candidate.
 
-## A4. Re-measure Isaac Sim's `/scan` rate in simulated time
+## A4. Re-measure Isaac Sim's `/scan` rate in simulated time — **done 2026-09-18, nothing to fix**
 
-`docs/status.md` records Gazebo 5.0 Hz against Isaac **3.5 Hz**, while the
-profile says `scanRateBaseHz: 5.0` and the real LDS-01 spins at 5 Hz.
+**It is 5.0 Hz.** The 3.5 Hz in `docs/status.md` was a wall-clock number at an
+RTF below 1.0, exactly as this item suspected.
 
-**Why it matters:** a scan rate is evidence per metre travelled. AMCL updates
-on scans, not on time; slam_toolbox adds a node per scan. If Isaac delivers 30%
-fewer scans over the same trajectory, part of any localisation difference is a
-sampling difference rather than a sensor-model difference — and the perception
-row of `docs/experiment.md` stops being attributable, which is the one thing it
-exists to guarantee.
+| | `/scan`, simulated time | `/scan`, wall clock | RTF |
+|---|---|---|---|
+| gazebo | **5.0000 Hz** | 4.9985 Hz | 0.9997 |
+| isaacsim | **5.0000 Hz** | 4.1925 Hz | 0.8385 |
 
-That number predates the 240 Hz change and may have been wall-clock, where an
-RTF of 0.9 explains part of it. Re-measure in **simulated** time at the current
-default. If it is not 5.0, it belongs in `turtlebot3_isaacsim`, which owns the
-profile and the render loop.
+Both match the profile's `scanRateBaseHz: 5.0` and the real LDS-01, with zero
+jitter. Isaac's RTF is confirmed independently from `/clock` (25.417 simulated
+seconds in 29.971 wall, **0.848**), so the wall figure is the sim figure times
+the RTF and nothing else.
+
+**So there is no sampling difference, and the perception row stays
+attributable.** AMCL updates per scan and slam_toolbox adds a node per scan;
+both backends deliver the same scans per simulated second over the same
+trajectory. Nothing goes to `turtlebot3_isaacsim`.
+
+`scan_test` now reports `scan_rate_hz` and `wall_rate_hz` in every run, so the
+confound cannot return — and on hardware that first field is the robot's own
+clock, which is the same statement for it and pairs with B2's `ros2 topic hz`.
+The rest of the 2026-09-14 rate table had the same confound and is re-measured
+in `docs/status.md`.
 
 ## A5. Keep the pre-flight checks passing
 
-Both cheap, both passing as of 2026-09-18 (3/3 worlds consistent; 11 tests in
-0.15 s). Run after every change in this section.
+Both cheap, both passing after everything in this section (3/3 worlds
+consistent; **13** tests in 0.28 s — two of the new ones pin AMCL's start pose,
+and one of those is what caught the `RewrittenYaml` error in B5). Run after
+every change here.
 
 ```bash
 docker compose exec tb3_ros bash -lc 'cd /repo && python3 scripts/check_worlds.py'
@@ -140,11 +158,26 @@ docker compose exec tb3_ros bash -lc 'source /ws/install/setup.bash && \
     cd /ws/src/tb3_bringup && python3 -m pytest test/ -q'
 ```
 
-## A6. Chrony on the workstation
+## A6. Chrony on the workstation — **surveyed 2026-09-18, needs a sudo password**
 
-The workstation half of B1 needs no robot. Config and reasoning:
-`docs/roadmap.md` §2. Also check whether `ufw` is active — if it is, NTP needs
-a rule for the robot's subnet.
+Everything that can be checked without root has been. Confirmed on the
+workstation that day: chrony is **not installed** (`dpkg -l chrony` → `un`),
+`systemd-timesyncd` is the active NTP service, the address is **10.118.5.241**
+— the one the Pi's `server` line names — and **`ufw` is active**, which settles
+the open question in `docs/roadmap.md` §2: the firewall rule is required, not
+optional. Without it the Pi's NTP requests are dropped and chrony on the robot
+sits at `?` with nothing on either machine saying why.
+
+Three commands, all needing a password, so they are run by hand:
+
+```bash
+sudo apt install chrony
+sudo ufw allow from 10.118.16.0/22 to any port 123 proto udp
+printf 'allow 10.118.16.0/22\nlocal stratum 10\n' | sudo tee -a /etc/chrony/chrony.conf
+sudo systemctl restart chrony
+```
+
+Why each line, and the Pi half: `docs/roadmap.md` §2.
 
 ## A7. The AMCL initial-pose fix — **done 2026-09-18**
 

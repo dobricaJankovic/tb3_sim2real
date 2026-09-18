@@ -44,3 +44,11 @@ worlds/*/isaac/snapshot.png
 
 # Raw drive_test traces; the committed summaries beside them are the record.
 measurements/*.samples.json
+measurements/*.beams.json
+
+# Rosbags, for the same reason and more so: megabytes of raw messages per run,
+# written by drive_test and nav_test with bag_dir:=. The bag is the thing you
+# go back to when the summary turns out to have averaged something away, so it
+# is kept on disk -- it is just not repository data. bagging.py chowns it back
+# to the host user, so it can be deleted without sudo.
+measurements/bags/

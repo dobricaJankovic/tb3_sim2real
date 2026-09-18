@@ -1,0 +1,79 @@
+{
+ "label": "isaacsim",
+ "world": "small_office",
+ "scans_averaged": 100,
+ "beams": 360,
+ "angle_min": -3.14159,
+ "angle_increment": 0.017453,
+ "range_min": 0.11999999731779099,
+ "range_max": 3.5,
+ "sensor_xy": [
+  -1.532,
+  -1.5
+ ],
+ "valid_return_fraction": 0.825,
+ "wall_error_m": {
+  "n": 223,
+  "mean": -0.00073,
+  "sd": 0.01527,
+  "max_abs": 0.04773
+ },
+ "prop_returns": 68,
+ "leaks": 6,
+ "leak_examples": [
+  {
+   "i": 157,
+   "angle": -0.40143,
+   "predicted": 2.5593,
+   "measured": 2.6137,
+   "hits": "wall_south",
+   "spread": 0.16077,
+   "returns": 86,
+   "error": 0.05439
+  },
+  {
+   "i": 158,
+   "angle": -0.38397,
+   "predicted": 2.66947,
+   "measured": 2.72502,
+   "hits": "wall_south",
+   "spread": 0.20041,
+   "returns": 81,
+   "error": 0.05556
+  },
+  {
+   "i": 159,
+   "angle": -0.36652,
+   "predicted": 2.79043,
+   "measured": 2.86019,
+   "hits": "wall_south",
+   "spread": 0.20662,
+   "returns": 76,
+   "error": 0.06977
+  },
+  {
+   "i": 160,
+   "angle": -0.34907,
+   "predicted": 2.9238,
+   "measured": 2.9964,
+   "hits": "wall_south",
+   "spread": 0.21445,
+   "returns": 74,
+   "error": 0.0726
+  },
+  {
+   "i": 161,
+   "angle": -0.33161,
+   "predicted": 3.07155,
+   "measured": 3.15116,
+   "hits": "wall_south",
+   "spread": 0.22166,
+   "returns": 70,
+   "error": 0.07961
+  }
+ ],
+ "noise_spread_mean": 0.07111,
+ "scan_rate_hz": 5.0,
+ "wall_rate_hz": 4.1925,
+ "scan_rate_jitter": 0.0
+}

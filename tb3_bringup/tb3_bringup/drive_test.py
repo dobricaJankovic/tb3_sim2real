@@ -17,7 +17,7 @@ to measure.
 A rosbag is recorded alongside the JSON whenever `bag_dir` is set, and the
 experiments should always set it: the summary below is DERIVED, and a metric
 nobody thought of on the night of the run is only recoverable from the raw
-messages. Topics and the root-ownership trap: `bagging.py`.
+messages. Topics and the root-ownership trap: `recording.py`.
 
 It records the drive chain at three points, so that a discrepancy can be
 attributed rather than just noticed:
@@ -47,7 +47,8 @@ from rclpy.parameter import Parameter
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import JointState
 
-from tb3_bringup.bagging import DRIVE_TOPICS, start_bag, stop_bag
+from tb3_bringup.recording import (DRIVE_TOPICS, give_back, start_bag,
+                                   stop_bag)
 
 # name, linear.x (m/s), angular.z (rad/s), seconds.
 #
@@ -309,6 +310,7 @@ class DriveTest(Node):
         if self.out:
             with open(self.out, 'w') as f:
                 json.dump(report, f, indent=1)
+            give_back(self.out)
             self.get_logger().info('wrote ' + self.out)
             # The raw trace goes beside it, not in it. The summary is a few KB
             # and worth committing as evidence; the samples are ~600 KB a run
@@ -316,6 +318,7 @@ class DriveTest(Node):
             raw = self.out.rsplit('.json', 1)[0] + '.samples.json'
             with open(raw, 'w') as f:
                 json.dump({'label': self.label, 'samples': self.samples}, f)
+            give_back(raw)
             self.get_logger().info('wrote ' + raw)
         return report
 

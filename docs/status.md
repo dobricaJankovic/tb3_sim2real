@@ -161,6 +161,78 @@ profile belongs to `turtlebot3_isaacsim`, and trading angular noise for angular
 bias is a question about AMCL and slam_toolbox rather than about the sensor.
 See `docs/roadmap.md` section 6.
 
+### Gazebo's `/ground_truth/odom` is real — 2026-09-18
+
+**The one unverified link in the measurement chain, now exercised.** The P3D
+plugin in `launch/backends/gazebo.launch.py` had been written and never run,
+and its failure mode is silent: a world plugin loaded through the system plugin
+loader "is accepted and silently never attaches". It attaches.
+
+`ros2 topic hz`: **49.986 Hz** against the plugin's `update_rate` of 50.0,
+`frame_id: world`, `child_frame_id: base_footprint`. A full `drive_test`
+(`measurements/2026-09-18_gazebo_ground_truth.json`) reports
+`ground_truth: /ground_truth/odom` with a non-null `truth_d` on every phase.
+
+The wheel → body layer on Gazebo, which this makes measurable for the first
+time — wheels forward-integrated by exact kinematics against the true body
+pose:
+
+| | wheels say | body did | slip |
+|---|---|---|---|
+| `rotate` `wz = 0.5`, yaw | 2.4781 rad | 2.4797 rad | **+0.06%** |
+| `arc`, path length | 0.4927 m | 0.4900 m | **−0.55%** |
+| `straight`, distance | 0.7358 m | 0.7370 m | **+0.16%** |
+
+**Gazebo has no measurable slip**, which is what `mu = 100000` on its wheels
+predicts, and it is the number Isaac's **−7.1%** pivot slip now has something to
+be compared against. Say it as "Gazebo's stock burger has slip disabled", not
+as "Gazebo's contact model predicts no slip": 100000 is a sentinel, not a
+physical value. `docs/experiment-plan.md` B10.
+
+Note the sign: on Gazebo the body moves very slightly FURTHER than the wheels
+in a straight line, where Isaac's body falls short. At 0.16% over 0.74 m that
+is 1.2 mm and is sampling, not a phenomenon.
+
+### Isaac Sim's `/scan` is 5.0 Hz, not 3.5 — 2026-09-18
+
+The 3.5 Hz in the 2026-09-14 table below was **measured on the wall clock**.
+Measured on the *simulator's*, by `scan_test`, `world:=small_office`,
+100 scans each:
+
+| | `/scan`, simulated time | `/scan`, wall clock | real-time factor |
+|---|---|---|---|
+| gazebo | **5.0000 Hz** | 4.9985 Hz | 0.9997 |
+| isaacsim | **5.0000 Hz** | 4.1925 Hz | 0.8385 |
+
+Both exactly the profile's `scanRateBaseHz: 5.0` and the real LDS-01's 5 Hz,
+with **zero jitter** — `max(gap) - min(gap)` is 0.00000 s on both, so neither
+is a right-on-average rate arriving in bursts. Isaac's implied RTF of 0.8385 is
+confirmed independently from `/clock`: 25.417 simulated seconds in 29.971 wall
+seconds, **RTF 0.848**.
+
+**So there is no sampling difference to attribute anything to**, and nothing
+here belongs in `turtlebot3_isaacsim`. AMCL updates per scan and slam_toolbox
+adds a node per scan; both backends deliver the same number of scans per
+simulated second over the same trajectory, so a localisation difference between
+them is a sensor-model difference. That is what the perception row of
+`docs/experiment.md` needed to be true.
+
+Every rate in the 2026-09-14 table has the same wall-clock confound. Re-measured
+in simulated time, on the same worlds:
+
+| | gazebo | isaacsim |
+|---|---|---|
+| `/scan` | 5.000 | 5.000 |
+| `/odom` | 29.412 | 60.000 |
+| `/joint_states` | 29.412 | 60.000 |
+| `/ground_truth/odom` | 50.000 | 60.000 |
+| `/clock` | 10 (unchanged) | 60.000 |
+
+Isaac publishes **everything** at exactly its 60 Hz render rate; Gazebo's rates
+are per-plugin. `scan_test` now reports `scan_rate_hz` and `wall_rate_hz` side
+by side in every run, so this confound cannot come back — and on hardware the
+same field is the real robot's own clock, which pairs with B2.
+
 ### Materials, and a fidelity bug in Gazebo too — 2026-09-15
 
 Isaac Sim rendered every stage grey because the manifest's only statement about
@@ -205,6 +277,10 @@ backends measured from the ROS side in the `tb3_ros` container.
 | `/joint_states` | 29.4 Hz | 56.5 Hz |
 | `/cmd_vel` | subscribed | subscribed |
 | tf `odom->base_footprint` | yes | yes |
+
+**Every Isaac column in that table is a WALL-CLOCK rate at an RTF below 1.0,
+and the sim-time rates are above (2026-09-18).** Read it as "the topics are
+live", which is what it was taken to establish, and not as a rate comparison.
 
 - **`backend:=gazebo world:=turtlebot3_world`** — every contract topic live,
   robot at the manifest's spawn: tf reads `[-2.000, -0.500, 0.009]`.

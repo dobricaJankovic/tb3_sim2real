@@ -30,14 +30,20 @@ one:
   wrong hypothesis.
 
 **Decided:** the manifest's `spawn:` supplies the initial pose on every backend,
-including `real`; an `initial_pose:=` launch argument overrides it, the way
-`map:=` overrides the world's map. A world name stays sufficient to define a
-run.
+including `real`. A world name stays sufficient to define a run.
+
+*The original decision added an `initial_pose:=` override "the way `map:=`
+overrides the world's map". Built 2026-09-18 without one, because `map:=` no
+longer exists either — it was removed for being a way for a run to drift away
+from the world it claims to be in, and an overridable start pose is the same
+argument. Add it the day a run genuinely needs to start somewhere other than
+the marker.*
 
 **Build it with Nav2's own parameters**, not a topic publish: AMCL has
-`set_initial_pose: true` with `initial_pose.{x,y,yaw}`. The repo currently
-publishes `/initialpose`, which races AMCL's activation — that race is exactly
-what swallowed the pose during the 2026-09-16 hardware test.
+`set_initial_pose: true` with `initial_pose.{x,y,yaw}`. A `/initialpose` publish
+races AMCL's activation — that race is exactly what swallowed the pose during
+the 2026-09-16 hardware test. *Built 2026-09-18; how, and the `RewrittenYaml`
+dead end, are in `docs/experiment-plan.md` B5.*
 
 **Physical prerequisite, confirmed available:** the robot can be placed at an
 exact known location in the real room. The manifest's spawn coordinates become
@@ -129,8 +135,18 @@ Pi — take the big jump once, immediately, before anything is launched.
 `makestep` is the whole story. `rtcsync` in the stock file is dead weight here
 with no RTC, harmless either way.)
 
-Unchecked: whether `ufw` is active on the workstation. If it is, NTP needs
-`sudo ufw allow from 10.118.16.0/22 to any port 123 proto udp`.
+**Checked 2026-09-18: `ufw` IS active on the workstation**, so the rule is not
+optional — without it the Pi's NTP requests are dropped and chrony on the robot
+sits at `?` forever with nothing on either machine saying why:
+
+```
+sudo ufw allow from 10.118.16.0/22 to any port 123 proto udp
+```
+
+Also confirmed the same day: chrony is **not installed** on the workstation
+(`dpkg -l chrony` → `un`), `systemd-timesyncd` is the active NTP service, and
+the workstation is at **10.118.5.241**, which is the address the Pi's `server`
+line above names.
 
 ### Checking it
 
@@ -399,8 +415,14 @@ decision stays here.*
    which need a sudo password on the Pi.*
 2. **A systemd unit on the Pi** running `robot.launch.py` at boot. Deletes
    HDMI, password and SSH from the workflow: power on, wait, it publishes.
-3. **`set_initial_pose` from the manifest**, replacing the `/initialpose`
-   publish, on all backends. Plus the floor marker in the real room.
+3. ~~**`set_initial_pose` from the manifest**, replacing the `/initialpose`
+   publish, on all backends.~~ **Built 2026-09-18** as `pin_initial_pose()` in
+   `bringup.launch.py`, and verified on `turtlebot3_world`. NOT with
+   `RewrittenYaml`: on Humble it rewrites only paths the source file already
+   has, so all four keys were silently dropped and AMCL went on waiting for a
+   mouse with no error anywhere — see `docs/experiment-plan.md` B5. It writes a
+   temp copy of the params file instead, so `config/nav2_params.yaml` stays
+   verbatim upstream. What remains is the floor marker in the real room.
 4. ~~**`slam:=true`** wrapping slam_toolbox, the map-saving wrapper that writes
    into the world directory.~~ **Done 2026-09-16**, with `slam` and `nav`
    independent rather than alternative — see section 3. Not yet driven: SLAM

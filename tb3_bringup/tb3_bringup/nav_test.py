@@ -20,7 +20,7 @@ the straight-line distance, final position and heading error, how many recovery
 behaviours fired, and the closest it came to an obstacle. With `bag_dir` set a
 rosbag is recorded alongside, so that a metric nobody thought of tonight can be
 derived later without re-running the matrix -- the same recorder drive_test
-uses, in `bagging.py`.
+uses, in `recording.py`.
 """
 
 import json
@@ -39,7 +39,7 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import LaserScan
 from tf2_ros import Buffer, TransformListener
 
-from tb3_bringup.bagging import NAV_TOPICS, start_bag, stop_bag
+from tb3_bringup.recording import NAV_TOPICS, give_back, start_bag, stop_bag
 
 # x, y, yaw, in the map frame.
 #
@@ -291,6 +291,7 @@ class NavTest(Node):
         if self.out:
             with open(self.out, 'w') as f:
                 json.dump(report, f, indent=1)
+            give_back(self.out)
             self.get_logger().info('wrote ' + self.out)
         return report
 

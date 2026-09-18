@@ -24,6 +24,17 @@ itself into one of three cases without anyone having to model a chair.
     measured <  predicted      a prop return   -> counted, excluded
     measured >  predicted      a LEAK: the beam passed through a wall that the
                                manifest says is there. Always a defect.
+
+It also reports the SCAN RATE, in the same file as the geometry, because a scan
+rate is evidence per metre travelled and the two are only comparable together.
+AMCL updates on scans rather than on time and slam_toolbox adds a node per
+scan, so a backend delivering fewer scans over the same trajectory makes part
+of any localisation difference a sampling difference rather than a sensor-model
+one — and the perception row stops being attributable, which is the one thing
+it exists to guarantee. Measured on the SIMULATOR's clock (the real robot's own
+clock on hardware, which is the same statement for it) and on the wall clock
+side by side, since an RTF below 1.0 moves the second and must not be allowed
+to masquerade as the first.
 """
 
 import json
@@ -37,6 +48,7 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import LaserScan
 
 from tb3_bringup import worlds
+from tb3_bringup.recording import give_back
 
 # base_footprint -> base_scan for the burger, from turtlebot3_description:
 # base_joint (0, 0, 0.010) composed with scan_joint (-0.032, 0, 0.172).
@@ -67,6 +79,36 @@ def ray_box(ox, oy, dx, dy, cx, cy, sx, sy):
     return lo if lo > 0.0 else None
 
 
+def scan_rate(stamps, arrivals):
+    """Scans per second, on the publisher's clock and on this machine's.
+
+    Both, and never just one. `scan_rate_hz` is the number that belongs beside
+    the geometry -- it is what the sensor model produces per simulated second,
+    and it is what the real LDS-01 produces per second. `wall_rate_hz` is what
+    `ros2 topic hz` would print, and it is the first number divided by the
+    real-time factor; the gap between the two is the confound, reported rather
+    than left for someone to rediscover.
+
+    From the FIRST to the LAST stamp over the intervals between them, not a
+    mean of reciprocals: a single dropped scan makes one interval twice as long
+    and two reciprocals that do not average back to the truth.
+    """
+    out = {'scan_rate_hz': None, 'wall_rate_hz': None, 'scan_rate_jitter': None}
+    if len(stamps) < 2:
+        return out
+    span, wall = stamps[-1] - stamps[0], arrivals[-1] - arrivals[0]
+    gaps = [b - a for a, b in zip(stamps, stamps[1:])]
+    if span > 0:
+        out['scan_rate_hz'] = round((len(stamps) - 1) / span, 4)
+        # Spread of the intervals, so a rate that is right on average while
+        # arriving in bursts is visible rather than averaged flat -- the
+        # mean-impersonating-a-constant trap this repository keeps falling into.
+        out['scan_rate_jitter'] = round(max(gaps) - min(gaps), 5)
+    if wall > 0:
+        out['wall_rate_hz'] = round((len(arrivals) - 1) / wall, 4)
+    return out
+
+
 class ScanTest(Node):
 
     def __init__(self):
@@ -84,6 +126,8 @@ class ScanTest(Node):
             LaserScan, 'scan', self._on_scan,
             QoSProfile(depth=20, reliability=ReliabilityPolicy.BEST_EFFORT))
         self.scans = []
+        self.stamps = []     # header stamps: the publisher's clock
+        self.arrivals = []   # time.monotonic(): this machine's wall clock
 
         # Every box whose vertical extent straddles the scan plane. A body that
         # the beam passes over is not an obstacle to it, and saying so here is
@@ -110,6 +154,12 @@ class ScanTest(Node):
     def _on_scan(self, msg):
         if len(self.scans) < self.n_scans:
             self.scans.append(msg)
+            # Two clocks, deliberately. The header stamp is the simulator's own
+            # (the robot's, on hardware); time.monotonic() is this machine's.
+            # Recording only the second would make an RTF of 0.9 read as a
+            # sensor publishing at 4.5 Hz.
+            self.stamps.append(msg.header.stamp.sec + msg.header.stamp.nanosec / 1e9)
+            self.arrivals.append(time.monotonic())
 
     def predict(self, ox, oy, angle):
         dx, dy = math.cos(angle), math.sin(angle)
@@ -198,15 +248,20 @@ class ScanTest(Node):
             'leak_examples': leaks[:5],
             'noise_spread_mean': round(
                 sum(b['spread'] for b in beams) / float(n), 5),
+            **scan_rate(self.stamps, self.arrivals),
         }
         self.get_logger().info(json.dumps(
             {k: report[k] for k in ('valid_return_fraction', 'wall_error_m',
-                                    'prop_returns', 'leaks')}))
+                                    'prop_returns', 'leaks',
+                                    'scan_rate_hz', 'wall_rate_hz')}))
         if self.out:
+            beams_out = self.out.rsplit('.json', 1)[0] + '.beams.json'
             with open(self.out, 'w') as f:
                 json.dump(report, f, indent=1)
-            with open(self.out.rsplit('.json', 1)[0] + '.beams.json', 'w') as f:
+            with open(beams_out, 'w') as f:
                 json.dump({'label': self.label, 'beams': beams}, f)
+            give_back(self.out)
+            give_back(beams_out)
             self.get_logger().info('wrote ' + self.out)
         return report
 

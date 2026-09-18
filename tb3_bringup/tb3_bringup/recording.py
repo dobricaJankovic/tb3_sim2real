@@ -1,4 +1,4 @@
-"""Record a rosbag beside an instrument's JSON summary.
+"""What an instrument writes: the rosbag, and who ends up owning the files.
 
 Shared by drive_test and nav_test because the bag is the raw data and the
 summary is derived from it: a metric nobody thought of on the night of the run
@@ -9,18 +9,21 @@ way back was the unaveraged samples.
 Two things this handles that a bare `ros2 bag record` does not.
 
 **Topics that do not exist on every backend.** `/clock` and `/ground_truth/odom`
-are simulator-only and `/imu` is not published by Gazebo's burger; rosbag2
-subscribes to a named topic when it appears and simply records nothing for one
-that never does. That absence is data — it is how a bag says which backend it
-came from — so the list is the same on all three and is not filtered per
-backend.
+are simulator-only, `/battery_state` is the real robot's alone, and `/imu` —
+measured 2026-09-18 — is published by Gazebo and the real robot but NOT by
+Isaac Sim. rosbag2 subscribes to a named topic when it appears and simply
+records nothing for one that never does. That absence is data — it is how a bag
+says which backend it came from — so the list is the same on all three and is
+not filtered per backend.
 
 **Root-owned files in the repository.** Everything here runs as root inside the
-container, and the workspace is a bind mount, so a bag written into the repo
-lands root:root and cannot be removed from the host without sudo. One did, on
-2026-09-18, and it blocked a git merge. So the finished bag is chowned to
-whoever owns the directory it was written into — the host user, for anything
-under the mount, and a no-op for a path that is already ours.
+container, and the workspace is a bind mount, so anything an instrument writes
+into the repo lands root:root and cannot be removed or rewritten from the host
+without sudo. A directory of bags did exactly that on 2026-09-18 and blocked a
+git merge. `give_back()` is the fix and it is not only about bags — the JSON
+summaries and the raw traces beside them are written the same way and had the
+same problem, which is why all three instruments call it on every file they
+write.
 """
 
 import os
@@ -31,10 +34,9 @@ import subprocess
 # The open-loop chain, end to end: what was commanded, what the wheels did,
 # where the body went, and what the robot thinks all of that means.
 #
-# /clock and /ground_truth/odom exist on the two simulators only, /imu on the
-# real robot and Isaac Sim only. Recording the same list everywhere is what
-# makes the bag self-describing rather than needing a note about which backend
-# wrote it.
+# Not every backend publishes every one of these, and that is the point: see
+# the module docstring. Recording the same list everywhere is what makes the
+# bag self-describing rather than needing a note about which backend wrote it.
 DRIVE_TOPICS = ('/odom', '/cmd_vel', '/joint_states', '/tf', '/tf_static',
                 '/imu', '/clock', '/ground_truth/odom',
                 # Real robot only, and a CONTROL rather than a measurement: the
@@ -74,27 +76,36 @@ def stop_bag(proc, bag_dir):
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.wait()
-    _give_back(bag_dir)
+    give_back(bag_dir)
 
 
-def _give_back(bag_dir):
-    """chown the bag to whoever owns the directory it was written into.
+def give_back(path):
+    """chown a written file or directory to whoever owns the directory above it.
 
-    Best effort on purpose: failing to chown is worth a recording that exists,
-    and on a host where this is not root the whole thing is already a no-op.
+    Call it on everything an instrument writes into the repository. Inside the
+    container that is the host user; run anywhere else it is already a no-op,
+    because the process is not root or the parent is.
+
+    Best effort on purpose: a recording that exists and is awkward to delete
+    beats a recording that failed at the last step.
     """
-    if not bag_dir or not os.path.isdir(bag_dir) or os.geteuid() != 0:
+    if not path or not os.path.exists(path) or os.geteuid() != 0:
         return
-    parent = os.path.dirname(os.path.abspath(bag_dir)) or '/'
+    parent = os.path.dirname(os.path.abspath(path)) or '/'
     try:
         owner = os.stat(parent)
     except OSError:
         return
     if owner.st_uid == 0:
         return
-    for root, dirs, files in os.walk(bag_dir):
-        for name in (*dirs, *files, ''):
-            try:
-                os.chown(os.path.join(root, name), owner.st_uid, owner.st_gid)
-            except OSError:
-                pass
+
+    def chown(p):
+        try:
+            os.chown(p, owner.st_uid, owner.st_gid)
+        except OSError:
+            pass
+
+    chown(path)
+    for root, dirs, files in os.walk(path):
+        for name in (*dirs, *files):
+            chown(os.path.join(root, name))
