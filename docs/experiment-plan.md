@@ -21,11 +21,13 @@ being fixed are at the bottom, so they are not reopened.
 
 No dependencies between these; take them in any order except A0.
 
-**Worked through on 2026-09-18. A0-A5 and A7 are done; A6 is surveyed and
-waits only on a sudo password.** Each item below records what it found, and two
-of them found the plan wrong: `RewrittenYaml` cannot create absent keys (B5),
-and `/imu` comes from Gazebo rather than Isaac Sim (A2). Section B is untouched
-and still needs the robot.
+**Worked through on 2026-09-18. Section A is DONE, A0 through A7.** Each item
+below records what it found, and two of them found the plan wrong:
+`RewrittenYaml` cannot create absent keys (B5), and `/imu` comes from Gazebo
+rather than Isaac Sim (A2).
+
+**The next thing to do is B1, and it needs the robot in the room.** Everything
+from here on does.
 
 ## A0. The `.repos` pin — **fixed 2026-09-18, listed so it is not undone**
 
@@ -158,26 +160,29 @@ docker compose exec tb3_ros bash -lc 'source /ws/install/setup.bash && \
     cd /ws/src/tb3_bringup && python3 -m pytest test/ -q'
 ```
 
-## A6. Chrony on the workstation — **surveyed 2026-09-18, needs a sudo password**
+## A6. Chrony on the workstation — **done 2026-09-18**
 
-Everything that can be checked without root has been. Confirmed on the
-workstation that day: chrony is **not installed** (`dpkg -l chrony` → `un`),
-`systemd-timesyncd` is the active NTP service, the address is **10.118.5.241**
-— the one the Pi's `server` line names — and **`ufw` is active**, which settles
-the open question in `docs/roadmap.md` §2: the firewall rule is required, not
-optional. Without it the Pi's NTP requests are dropped and chrony on the robot
-sits at `?` with nothing on either machine saying why.
+Installed and configured by hand (it needs a password; nothing here runs it
+unattended). Verified the same day, on the workstation, without root:
 
-Three commands, all needing a password, so they are run by hand:
+| | |
+|---|---|
+| `dpkg -l chrony` | `ii  4.5-1ubuntu4.2` |
+| `systemctl is-active chrony` | `active` |
+| `systemctl is-active systemd-timesyncd` | **`inactive`** — the handover happened |
+| `chronyc tracking` | `time.cloudflare.com`, stratum 4, last offset **+52 µs** |
+| `/etc/chrony/chrony.conf` | `allow 10.118.16.0/22` and `local stratum 10`, lines 63-64 |
+| `ss -uln` | **`0.0.0.0:123`** open — it is serving, not just consuming |
 
-```bash
-sudo apt install chrony
-sudo ufw allow from 10.118.16.0/22 to any port 123 proto udp
-printf 'allow 10.118.16.0/22\nlocal stratum 10\n' | sudo tee -a /etc/chrony/chrony.conf
-sudo systemctl restart chrony
-```
+Only one daemon may own the clock and only one now does. The workstation is a
+stratum-4 server on 10.118.5.241 with the robot's subnet allowed, which is
+everything B1 needs from this side.
 
-Why each line, and the Pi half: `docs/roadmap.md` §2.
+**Two things still need root and neither can be settled from here:** whether the
+`ufw allow ... port 123` rule actually landed (`sudo ufw status | grep 123`) and
+whether the robot has polled (`sudo chronyc clients` — it answers `501 Not
+authorised` otherwise). The second is only answerable once the Pi is up, so both
+are folded into B1 rather than left as loose ends here.
 
 ## A7. The AMCL initial-pose fix — **done 2026-09-18**
 
@@ -192,23 +197,48 @@ account, including the `RewrittenYaml` claim that turned out to be false:
 
 In order. Each step gates the ones after it.
 
-## B1. Clock sync, before anything is believed — **blocking**
+## B1. Clock sync, before anything is believed — **blocking; workstation half done**
 
-Measured 2026-09-16: the workstation is **157 ms ahead** of the Pi, neither
-machine runs chrony, and they sync to different upstreams. 157 ms is most of an
+Measured 2026-09-16: the workstation was **157 ms ahead** of the Pi, neither
+machine ran chrony, and they synced to different upstreams. 157 ms is most of an
 LDS-01 scan period and the same order as Nav2's `transform_tolerance`; the
 2026-09-16 test already logged the dropped-scan message filter line. The Pi has
 **no RTC**, so it does not drift by a constant — it boots arbitrary and *steps*,
 and a step mid-run invalidates tf caches on both machines.
 
-Full config, both machines, and the reasoning for chrony over timesyncd:
-**`docs/roadmap.md` §2.** The workstation half is A6; the Pi half needs a sudo
-password, so it is a by-hand step.
+**The workstation is done (A6):** chrony 4.5 active, `systemd-timesyncd`
+handed over, tracking an upstream at 52 µs, serving on UDP 123 with
+`allow 10.118.16.0/22`. What remains is the Pi and the proof.
 
-Verify with the check that trusts neither daemon — `date +%s.%N` on both, as
-close together as possible. **Target single- to low-double-digit ms.** Check it
-**right after the Pi boots**, because that is when experiments start, and never
-let a correction land during a run.
+Full config and the reasoning for chrony over timesyncd: **`docs/roadmap.md`
+§2.** The Pi half needs a sudo password there, so it is a by-hand step:
+
+```bash
+# on the Pi
+sudo apt install chrony
+echo 'server 10.118.5.241 iburst prefer' | sudo tee -a /etc/chrony/chrony.conf
+sudo systemctl restart chrony
+sudo chronyc makestep          # take the boot jump now, not mid-run
+```
+
+Then three checks, in this order, because the first two are the daemons'
+self-reports and the third trusts neither:
+
+1. **On the Pi** — `chronyc tracking` names **10.118.5.241** as `Reference ID`,
+   and `chronyc sources -v` marks that line **`*`**, not `+` or `?`. A `?` here
+   is the firewall: confirm the workstation rule with
+   `sudo ufw status | grep 123` and add it if it is missing —
+   `sudo ufw allow from 10.118.16.0/22 to any port 123 proto udp`. `ufw` is
+   active on the workstation (checked 2026-09-18), so without the rule the Pi's
+   requests are dropped silently on both sides.
+2. **On the workstation** — `sudo chronyc clients` lists the robot once it has
+   polled. (Unprivileged it answers `501 Not authorised`, which is not a
+   failure.)
+3. **`date +%s.%N` on both**, as close together as possible. **Target single- to
+   low-double-digit ms** against the 157 measured before.
+
+Check it **right after the Pi boots**, because that is when experiments start,
+and never let a correction land during a run.
 
 ## B2. Four confirmations, one command each
 

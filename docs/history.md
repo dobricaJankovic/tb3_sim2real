@@ -2205,3 +2205,28 @@ NTP service, the address is 10.118.5.241 — and **`ufw` is active**, which
 settles the question roadmap §2 left open: the rule for the robot's subnet is
 required, not optional. Without it the Pi's requests are dropped and chrony
 there sits at `?` with nothing on either machine explaining why.
+
+### A6 closed the same day: chrony on the workstation
+
+Installed and configured by hand — it needs a password, so nothing in this
+repository does it. Verified without root: chrony 4.5 `active`,
+`systemd-timesyncd` **`inactive`** (the package does that handover itself, which
+is what keeps two daemons from fighting over one clock), tracking
+`time.cloudflare.com` at stratum 4 with a last offset of **+52 µs**, both
+`allow 10.118.16.0/22` and `local stratum 10` in the config, and `ss -uln`
+showing `0.0.0.0:123` — the distinction worth checking, because a chrony with no
+`allow` line consumes time without serving it and looks identical in
+`chronyc tracking`.
+
+So the workstation is a stratum-4 NTP server on 10.118.5.241 with the robot's
+subnet allowed. Two things could not be settled from here and are folded into
+B1 rather than left loose: whether the `ufw` rule landed (`sudo ufw status`) and
+whether the robot has polled (`sudo chronyc clients`, which answers `501 Not
+authorised` unprivileged). The second is unanswerable until the Pi is up
+anyway, and both have the same single proof — `chronyc sources -v` on the Pi
+marking the workstation `*` rather than `?`.
+
+**Section A is now done end to end, and everything left needs the robot in the
+room.** Next is B1: chrony on the Pi, then the check that trusts neither
+daemon's self-report — `date +%s.%N` on both machines, right after the Pi boots,
+against the 157 ms measured on 2026-09-16.

@@ -135,7 +135,7 @@ Pi — take the big jump once, immediately, before anything is launched.
 `makestep` is the whole story. `rtcsync` in the stock file is dead weight here
 with no RTC, harmless either way.)
 
-**Checked 2026-09-18: `ufw` IS active on the workstation**, so the rule is not
+**`ufw` IS active on the workstation** (checked 2026-09-18), so the rule is not
 optional — without it the Pi's NTP requests are dropped and chrony on the robot
 sits at `?` forever with nothing on either machine saying why:
 
@@ -143,10 +143,19 @@ sits at `?` forever with nothing on either machine saying why:
 sudo ufw allow from 10.118.16.0/22 to any port 123 proto udp
 ```
 
-Also confirmed the same day: chrony is **not installed** on the workstation
-(`dpkg -l chrony` → `un`), `systemd-timesyncd` is the active NTP service, and
-the workstation is at **10.118.5.241**, which is the address the Pi's `server`
-line above names.
+### Done on the workstation, 2026-09-18
+
+Installed and configured by hand. Verified without root: chrony **4.5** `active`,
+`systemd-timesyncd` **`inactive`** (the package performed the handover, so only
+one daemon owns the clock), `chronyc tracking` disciplined to
+`time.cloudflare.com` at stratum 4 with a last offset of **+52 µs**, both
+`allow 10.118.16.0/22` and `local stratum 10` present in
+`/etc/chrony/chrony.conf`, and `ss -uln` showing **`0.0.0.0:123`** — it is
+serving, not merely consuming.
+
+The workstation is now a stratum-4 NTP server on 10.118.5.241 with the robot's
+subnet allowed. **The Pi half and the verification are `docs/experiment-plan.md`
+B1**, and both need the robot powered on.
 
 ### Checking it
 
@@ -409,10 +418,11 @@ the two experiments and says which half needs the robot. The reasoning for each
 decision stays here.*
 
 1. **chrony on both machines.** Cheap, and it removes a whole class of ghost
-   failure. Prerequisite for trusting any hardware measurement. *Surveyed
-   2026-09-16 — the offset is measured and the config is written out in
-   section 2; what remains is `apt install` and editing two files, both of
-   which need a sudo password on the Pi.*
+   failure. Prerequisite for trusting any hardware measurement. *The
+   **workstation is done, 2026-09-18** — serving on 10.118.5.241, section 2 has
+   what was verified. What remains is the Pi: one `apt install`, one `server`
+   line, and the three checks in `docs/experiment-plan.md` B1. Needs the robot
+   powered on and a sudo password there.*
 2. **A systemd unit on the Pi** running `robot.launch.py` at boot. Deletes
    HDMI, password and SSH from the workflow: power on, wait, it publishes.
 3. ~~**`set_initial_pose` from the manifest**, replacing the `/initialpose`
