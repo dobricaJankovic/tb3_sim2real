@@ -2100,3 +2100,108 @@ fast-forward, and neither `rm` nor `mv` worked from the host. The fix is to move
 them from inside the container. Whatever gives `drive_test` a `bag_dir` must not
 recreate this — `docker-compose.yml`'s `ros_logs` comment already warned about
 exactly this and was not heeded.
+
+## 2026-09-18 (later) — Section A of the experiment plan, the half with no robot
+
+Everything in `docs/experiment-plan.md` Section A that does not need the robot
+in the room. A0–A5 and A7 are done; A6 is surveyed and waits only on a sudo
+password. Two items found the plan itself wrong, which is the part worth
+keeping.
+
+### `RewrittenYaml` cannot create keys that are not in the file
+
+B5's snippet — pin AMCL's `set_initial_pose` and `initial_pose.{x,y,yaw}` from
+the manifest, with `nav2_common`'s `RewrittenYaml` and dotted absolute paths —
+was written on an audit's finding that the class creates absent keys. It does
+not. On Humble, `substitute_params` builds the candidate set with `pathify()`,
+which enumerates the paths the source file **already has**, and rewrites only
+those. `updateYamlPathVals` *can* create intermediate dicts, but it is never
+reached for a path that was not already there.
+
+All four of those keys are absent from upstream's `nav2_params.yaml`. So the
+rewrite ran, the launch succeeded, a params file was written — and AMCL went on
+waiting for someone to click "2D Pose Estimate", with no error anywhere. The
+whole point of the item is that no run should need that click.
+
+What caught it was writing the test to *perform* the rewrite and read the file
+back, rather than to inspect the rewrite request. Inspecting the request would
+have passed. The lesson generalises: when the load-bearing behaviour is
+upstream's rather than ours, assert on what upstream actually produced.
+
+What shipped instead is `pin_initial_pose()`, which writes a temp copy of the
+params file with the four keys added — the same move `with_ground_truth()`
+already makes for the robot SDF in `backends/gazebo.launch.py`, and for the same
+reason: `config/nav2_params.yaml` stays verbatim upstream.
+
+### Isaac Sim's `/scan` was never slow — 3.5 Hz was a wall-clock number
+
+`docs/status.md` had carried Gazebo 5.0 Hz against Isaac 3.5 Hz since
+2026-09-14, and A4 existed because that would have made part of any
+localisation difference a *sampling* difference — AMCL updates per scan,
+slam_toolbox adds a node per scan — and the perception row of the experiment
+would have stopped being attributable.
+
+Measured on the simulator's own clock, 100 scans, `small_office`: **both
+backends are at exactly 5.0000 Hz, with `max(gap) - min(gap)` = 0.00000 s.**
+Isaac's wall rate of 4.1925 Hz is 5.0 times its real-time factor, and the RTF is
+confirmed independently from `/clock` — 25.417 simulated seconds in 29.971 wall
+seconds, 0.848.
+
+Then the same for every other topic, because the confound is not specific to
+`/scan`: **Isaac publishes `/odom`, `/joint_states`, `/ground_truth/odom` and
+`/clock` all at exactly 60.000 Hz in simulated time**, its render rate. The
+2026-09-14 table's 56.1 / 66.0 / 56.5 were that number times whatever RTF that
+run had. Gazebo's rates are per-plugin and its RTF is ~1.0, so its column was
+already right.
+
+The number is now produced by `scan_test` in every run, as `scan_rate_hz`
+beside `wall_rate_hz`, so it cannot silently become a wall figure again. On
+hardware the first field is the robot's own clock, which is the same statement
+for it.
+
+### Gazebo's ground truth works, and Gazebo has no slip
+
+The P3D plugin had been written on 2026-09-18 and never run, and this file
+already recorded that its failure mode is silent: a world plugin loaded through
+the system plugin loader is accepted and never attaches. It attaches — 49.986 Hz
+against `update_rate: 50.0`.
+
+So the wheel → body layer is measurable on Gazebo for the first time, and it
+reads **+0.06% in a pivot, −0.55% on an arc, +0.16% straight**. No measurable
+slip, which is what `mu = 100000` on the wheels predicts. That is the row
+Isaac's −7.1% pivot slip needed to be compared against, and it is worth saying
+carefully: Gazebo's stock burger has slip *disabled*, not predicted absent.
+100000 is a sentinel.
+
+### The root-ownership trap was never only about bags
+
+A2 said to keep `ros2 bag record` from leaving root-owned files in the repo.
+Writing that fix made it obvious that the JSON summaries and `.samples.json`
+traces are written by the same root process into the same bind mount — and
+every one of them already in `measurements/` was `root:root`. The same merge
+would have been blocked by the summaries alone.
+
+So `give_back()` is public in `recording.py` (was `bagging.py`; the name was
+too narrow the moment the second caller appeared), all three instruments call it
+on every file they write, and the existing files were chowned back from inside
+the container.
+
+### A3, and a diagnostic that had a decoy
+
+`common/rviz.launch.py` now runs `rviz2` directly with `use_sim_time`, since
+`nav2_bringup/rviz_launch.py` declares no such argument and could not receive
+one. Verified: `ros2 param get /rviz2 use_sim_time` → True, tf lines carry
+simulated stamps, and the message-filter reason `the timestamp on the message
+is earlier than all the data in the transform cache` — which is *word for word*
+what real Pi/workstation clock skew produces — is gone, 0 occurrences. What
+remains is `discarding message because the queue is full`, a different and
+benign reason. That distinction is the whole value: B1's diagnosis reads the
+reason string, and it now has one candidate instead of two.
+
+### A6, as far as no password goes
+
+chrony is not installed on the workstation, `systemd-timesyncd` is the active
+NTP service, the address is 10.118.5.241 — and **`ufw` is active**, which
+settles the question roadmap §2 left open: the rule for the robot's subnet is
+required, not optional. Without it the Pi's requests are dropped and chrony
+there sits at `?` with nothing on either machine explaining why.
