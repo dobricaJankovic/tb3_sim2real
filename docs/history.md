@@ -1796,3 +1796,99 @@ real `SCAN_OFFSET` bug on waffle on its first run.
 `measurements/isaac_angular_deficit.md`, `docs/status.md` and `CLAUDE.md` all
 still named the gain and have been retracted in place. The measurements are
 kept — they are correct and they reproduce — and now say what they meant.
+
+## 2026-09-18 — 240 Hz, and `/odom` stops telling the truth
+
+### Four sub-steps per frame, and the second copy that would have eaten the change
+
+480 Hz was chosen overnight as the first rate that met the acceptance numbers,
+not as a considered ratio. 240 — four PhysX sub-steps per rendered frame — is
+the conventional choice, and measured against the same instrument it is
+**equivalent to 480 within run-to-run scatter on every cell of the sweep**:
+wheel tracking within 1% on every linear command, 96–100% on every angular one
+but the slowest pivot. RTF 0.90 against 0.68, so the cheaper rate is free.
+
+The change would have done nothing. `backends/isaacsim.launch.py` had pinned
+its own `480.0` and forwarded it unconditionally, so the repository would have
+overridden the package default it was meant to follow — the "second copy free
+to drift" this repo keeps warning about, one day old, written by the agent that
+wrote the warning.
+
+Fixing that produced the second lesson, which is older than this repo:
+**`IncludeLaunchDescription` does not isolate launch configurations.** Declaring
+`physics_hz` as `''` in the backend did not mean "use the package default" — it
+*leaked into the included file and overrode it*, and the simulator died on
+`argument --physics-hz: expected one argument`. `bringup.launch.py`'s `inc()`
+has carried a comment about exactly this for months. Reading it is not the same
+as remembering it; a test now covers the hop.
+
+### The residual is slip, and slip is not a defect
+
+At 240 Hz the wheels turn as commanded and **the robot slides** — −7.1% in a
+pivot at `wz = 0.5`, −0.5% driving straight. That is what a burger pivoting on
+two wheels and a plastic skid does. Gazebo cannot reproduce it at all: `mu =
+1e5` on its wheels.
+
+So the **wheel collider stays a cylinder**. Spheres remove the chatter outright
+and meet every acceptance number, but a sphere contacts at a point, and the
+expectation is that Isaac — not Gazebo — is the backend that resembles the real
+robot here. Sub-stepping damps a symptom whose cause is the collider, and that
+is the intended trade rather than an unfinished job.
+
+### `/odom` was the truth, and that was the bug
+
+Isaac Sim's `/odom` carried the robot's **true pose**: `IsaacComputeOdometry`
+reads the chassis prim. This was never decided — it is what NVIDIA's reference
+graph wires up, adopted verbatim under the "prefer upstream's own examples"
+rule, and NVIDIA ships no encoder-based odometry OmniGraph node to wire
+instead. The rule was followed correctly and still produced the wrong thing.
+
+Odometry that cannot drift is not a harmless luxury:
+
+- **Nav2's entire job above `odom` is correcting that drift.** A backend
+  without it makes localisation unrealistically easy on exactly one of three —
+  a sim-to-real gap *manufactured by the apparatus* rather than measured by it.
+- **It concealed a real phenomenon.** Measured after the change, `/odom`
+  over-reports a pivot by **4.83%** and a straight line by 0.08%.
+
+`nodes/wheel_odometry.py` now integrates `/joint_states`; the chassis pose moved
+to `/ground_truth/odom`, the topic Gazebo already used. Both from one place,
+because a transform and an odometry message that disagree are among the hardest
+faults to see. It integrates wheel **position**, not velocity — velocity would
+be integrating the contact chatter the sub-step rate exists to suppress, and a
+real encoder counts ticks.
+
+Two asymmetries found and written down rather than smoothed over. Gazebo's
+`/odom` comes from the same plugin that drives the wheels, so it agrees with a
+forward integration of `/joint_states` *by construction* and slip is invisible
+in it. And the ground-truth **origins** differ — P3D is world-absolute, Isaac's
+is relative to the spawn pose, verified by spawning at `(-2.0, -0.5)` and
+reading `(-0.0, -0.0)`. Same topic, same meaning, different origin: consumers
+use deltas.
+
+**Departing from upstream is now written into `UPSTREAM.md` as a departure.**
+The rule exists because upstream's examples encode working node wiring that
+prose docs get wrong, and that part still holds exactly — the graph is unchanged
+but for a topic name. What was rejected is upstream's *semantics* for one topic,
+which is a different kind of claim and one this repository can actually check,
+because it runs one instrument against three backends.
+
+### The trap that cost an hour
+
+`pkill -9` on a wedged simulator can take the **`ros2` CLI daemon** with it.
+Afterwards every `ros2 topic list` fails — and under `2>/dev/null` it fails as
+an *empty list*, indistinguishable from a simulator that published nothing. A
+working change looked broken for an hour. `ros2 daemon stop && start`, or
+`docker compose restart tb3_ros`, which keeps `/ws/install`.
+
+Two habits avoid it: stop runs with **SIGINT**, not SIGKILL, so launch tears its
+children down in order; and gate readiness on **a log grep**, which needs no DDS
+discovery, rather than on `ros2 topic list` in a wait loop, which can fail for
+two unrelated reasons and cannot say which. Both are in
+`docs/troubleshooting.md`.
+
+### Deferred, not forgotten
+
+Isaac's lidar sits **0.544° — half a beam** — off the analytic bearing where
+Gazebo is exact. Measured, not diagnosed. `docs/roadmap.md` section 6 has the
+one experiment that splits an indexing convention from a mounting error.
