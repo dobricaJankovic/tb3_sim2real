@@ -1,0 +1,115 @@
+{
+ "label": "2026-09-18_isaacsim_scan_binning",
+ "question": "Why does Isaac Sim's /scan sit half a beam off the world manifest, when Gazebo's sits exactly on it?",
+ "provenance": {
+  "tb3_sim2real": "1a5779b",
+  "turtlebot3_isaacsim": "4231fbf",
+  "isaac_sim": "6.1.0-rc.26+release.49347.2d230af4.gl",
+  "lidar_profile": "models/lidar_configs/turtlebot3_lds.json",
+  "writer": "RtxLidarROS2PublishLaserScan",
+  "writer_args": {
+   "horizontalFov": 360.0,
+   "horizontalResolution": 1.0,
+   "azimuthRange": [
+    -180.0,
+    180.0
+   ],
+   "rotationRate": 5.0
+  }
+ },
+ "publisher_contract": {
+  "source": "isaacsim.ros2.nodes OgnROS2PublishLaserScan.cpp publishFromGMO -> getLaserScanOutputIndex; restated in isaacsim/ros2/nodes/tests/test_rtx_sensor.py",
+  "bin_index": "floor((azimuth_deg - azimuthRange[0]) / horizontalResolution)",
+  "angle_min_published": "azimuthRange[0]",
+  "consequence": "bin i spans [angle_min + i*inc, angle_min + (i+1)*inc) and is LABELLED with its lower edge, so the ray that filled it is always at or above the reported angle"
+ },
+ "ray_directions": {
+  "method": "same profile with rangeAccuracyM and azimuthErrorStd zeroed, in a box room of known size; the range alone fixes the true azimuth",
+  "reported_vs_geometric_mean_deg": 0.0,
+  "reported_vs_geometric_sd_deg": 0.0,
+  "first_six_azimuths_deg": [
+   0.0,
+   -1.0,
+   -2.0,
+   -3.0,
+   -4.0,
+   -5.0
+  ],
+  "conclusion": "the azimuth the sensor reports IS the direction the ray went, exactly; and the 360 rays fire at exactly integer degrees, i.e. exactly ON the publisher bin boundaries"
+ },
+ "as_shipped": {
+  "revolutions": 12,
+  "rays": 4320,
+  "per_revolution_mean_deg": [
+   0.5853,
+   0.5803,
+   0.2586,
+   0.4988,
+   0.2537,
+   0.5006,
+   0.5767,
+   0.6634,
+   0.4994,
+   0.5034,
+   0.4163,
+   0.5776
+  ],
+  "mean_deg": 0.4928,
+  "sd_deg": 0.4888,
+  "min_deg": 0.0004,
+  "max_deg": 0.9996,
+  "fraction_near_0": 0.5069,
+  "fraction_near_half": 0.0,
+  "fraction_near_1": 0.4931
+ },
+ "with_start_azimuth_offset_0p5": {
+  "revolutions": 12,
+  "rays": 4320,
+  "per_revolution_mean_deg": [
+   0.502,
+   0.4969,
+   0.5086,
+   0.4988,
+   0.5037,
+   0.5006,
+   0.4933,
+   0.4967,
+   0.4994,
+   0.5034,
+   0.4996,
+   0.4943
+  ],
+  "mean_deg": 0.4998,
+  "sd_deg": 0.0143,
+  "min_deg": 0.4575,
+  "max_deg": 0.5437,
+  "fraction_near_0": 0.0,
+  "fraction_near_half": 1.0,
+  "fraction_near_1": 0.0
+ },
+ "against_the_recorded_scans": {
+  "source": [
+   "measurements/2026-09-17_scan_gazebo.beams.json",
+   "measurements/2026-09-17_scan_isaacsim.beams.json"
+  ],
+  "method": "per-beam angular offset solved individually against ranges ray-cast from worlds/small_office/world.yaml, restricted to wall beams with real angular leverage",
+  "gazebo": {
+   "n": 149,
+   "mean_deg": -0.024,
+   "sd_deg": 0.142,
+   "median_deg": -0.01
+  },
+  "isaacsim": {
+   "n": 136,
+   "mean_deg": 0.481,
+   "sd_deg": 0.262,
+   "median_deg": 0.49
+  },
+  "note": "scan_test averages 20 scans per beam, which is why the real recorded offset is unimodal at half a beam rather than the bimodal 0-or-1 seen in a single revolution",
+  "scan_to_scan_spread_over_one_beam_of_range": {
+   "gazebo": 0.67,
+   "isaacsim": 1.78
+  }
+ },
+ "conclusion": "Isaac Sim s lidar is NOT rotated. The rays point exactly where they should. Every ray lands exactly on a publisher bin boundary, and the profile s own azimuth jitter decides which side it falls; the per-beam angular error is therefore 0 or one WHOLE beam, never half of one, and half a beam is only the mean of that coin flip."
+}

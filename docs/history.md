@@ -1892,3 +1892,81 @@ two unrelated reasons and cannot say which. Both are in
 Isaac's lidar sits **0.544° — half a beam** — off the analytic bearing where
 Gazebo is exact. Measured, not diagnosed. `docs/roadmap.md` section 6 has the
 one experiment that splits an indexing convention from a mounting error.
+
+---
+
+## 2026-09-18 — Isaac's lidar is not rotated; it is landing on bin boundaries
+
+The `0.544°` from 2026-09-17 finally has a cause, and it is not the one the
+number suggested. Full working: `docs/worknotes/2026-09-18-lidar-half-beam.md`.
+Instrument and results: `measurements/2026-09-18_isaacsim_scan_binning.{probe.py,json}`.
+
+### The problem
+
+`/scan` sat half a beam off ranges ray-cast from the world manifest, where
+Gazebo sat exactly on them. Half a bin looked like a beam-indexing convention —
+a range reported at the edge of an azimuth sector rather than its centre — so
+it went on the roadmap as a constant angular offset to be confirmed and
+removed.
+
+### The fix, or rather the finding
+
+Probing the sensor directly rather than its output kills the "rotation" twice
+over:
+
+1. With `rangeAccuracyM` and `azimuthErrorStd` zeroed, the azimuth the sensor
+   reports and the azimuth the box-room geometry implies agree to **0.0000°,
+   sd 0.0000**. The rays are aimed correctly. Nothing is rotated.
+2. Run as shipped, **no beam is ever half a beam off**. Over 4320 rays, 50.7%
+   are off by ~0.0° and 49.3% by a whole ~1.0°, and **0.0% by anything in
+   between**.
+
+The mechanism is an exact coincidence of two integers.
+`horizontalResolution = 360 * 5 / 1800 = 1.0°` and `startAzimuthOffsetDeg = 0`,
+so the 360 rays fire at exactly integer degrees. `ROS2PublishLaserScan` bins a
+return by `floor((azimuth - azimuthRange[0]) / horizontalResolution)` with
+`azimuthRange[0] = -180`, so its bin boundaries are at exactly integer degrees
+too. **Every ray lands precisely on a boundary**, and the profile's own
+`azimuthErrorStd = 0.015` — redrawn every revolution — decides which side.
+A ray a hair above keeps its bin; a ray a hair below falls into the one beneath,
+labelled a whole degree lower.
+
+### The concept worth keeping
+
+**This is the third time a mean has impersonated a constant in this repo.**
+"Under-rotates by 30%" was the mean of a chattering wheel. "Rotated by half a
+beam" is the mean of a coin flip. The giveaway was available the whole time and
+was read as noise: removing 0.544° left the residual at 0.00608 m against
+Gazebo's 0.00242 m. *A correction that does not close the residual is not the
+right correction* — a rigid rotation would have closed it. Two more signs, both
+in data already recorded: Isaac's scan-to-scan spread on beams with angular
+leverage is **1.78x one whole beam's worth of range**, against Gazebo's 0.67x
+(which is just its range noise); and `noise_spread_mean` is 0.05584 against
+Gazebo's 0.02991.
+
+Also worth keeping: **`scan_test` averaging 20 scans per beam is what
+manufactured the constant.** Averaging is the right thing to do to separate
+noise from a systematic offset — and it destroyed the bimodality that was the
+actual evidence. A per-beam solve on the same recordings shows Isaac at
++0.481° ± 0.262 unimodal, which is exactly what averaging a coin flip looks
+like and is *not* a rotation. When an instrument averages, keep a path to the
+unaveraged samples.
+
+And a smaller trap, in the probe rather than the product: reading the GMO
+annotator once per rendered frame latches the **same** revolution a dozen times
+over — 60 Hz of frames against 5 Hz of revolutions. Deduped by the lidar's own
+`timestampNs`, the azimuth jitter is redrawn every revolution; undeduped it
+looks like a fixed per-beam pattern, which would have pointed at a completely
+different cause.
+
+### Deliberately not changed
+
+The half beam is **structural to the node**: a bin labelled with its lower edge
+is half an increment low for any ray placement, and shifting `azimuthRange`
+moves labels and edges together. What *is* removable is the coin flip —
+`startAzimuthOffsetDeg = 0.5` plants each ray mid-bin and makes the error a
+constant **+0.4998°** with per-beam scatter **34x** smaller (0.4888° → 0.0143°).
+Same bias, no randomness, strictly better. Not applied: the profile belongs to
+`turtlebot3_isaacsim`, and trading zero-mean angular noise for a constant
+angular bias is a question about what AMCL and slam_toolbox prefer, which the
+three-map comparison should answer rather than an assumption.

@@ -328,7 +328,7 @@ starts *nothing*. It now raises instead of exiting silently. `ros2 launch`
 ignores unknown arguments, so a stale `robot:=remote` in someone's shell history
 is inert rather than an error.
 
-## 6. Isaac Sim's lidar is rotated by half a beam — measured, not diagnosed
+## 6. Isaac Sim's lidar is not rotated — diagnosed 2026-09-18
 
 Found 2026-09-17 by `ros2 run tb3_bringup scan_test`, which parks the robot at
 the manifest spawn in `small_office` and compares every beam against a range
@@ -343,30 +343,47 @@ beam:
 | gazebo | **+0.0000 rad (+0.000°)** | 0.00242 m |
 | isaacsim | **+0.0095 rad (+0.544°)** | 0.00608 m, down from 0.01509 |
 
-Gazebo is aligned exactly. Isaac is off by **0.544°, which is 0.54 of one 1.0°
-beam** — close enough to half a bin to suggest a beam-indexing convention
-(range reported at the edge of an azimuth sector rather than its centre) rather
-than a physical mounting error. Removing it cuts the residual by 2.5x and
-accounts for every leak.
+Gazebo is aligned exactly. Isaac reads **0.544°, which is 0.54 of one 1.0°
+beam**, and that was recorded as a hint at a beam-indexing convention.
 
-**Half a beam is a strong hint, not a diagnosis**, and nothing has been
-changed. It is small, systematic, and biases every scan match slightly — which
-is exactly the class of error the world registry exists to catch, and the
-angular twin of the silent lidar-offset risk already noted against
-`merge_fixed_joints`.
+**The hint was half right and the wrong shape.** Full diagnosis in
+`docs/worknotes/2026-09-18-lidar-half-beam.md`; in three lines:
 
-### The test, when this is picked up
+- With the profile's noise off, the azimuth the sensor reports and the azimuth
+  the geometry implies agree to **0.0000°**. Nothing is rotated, and there is
+  no mounting or tf error.
+- It **is** an indexing convention: `ROS2PublishLaserScan` bins by
+  `floor((azimuth - azimuthRange[0]) / horizontalResolution)` and labels each
+  bin with its lower edge. But the rays fire at exactly integer degrees and the
+  bin edges are at exactly integer degrees, so **every ray lands exactly on a
+  boundary** and `azimuthErrorStd` picks the side, fresh each revolution.
+- So it is **not a constant offset at all**: over 4320 rays, 50.7% are off by
+  ~0.0° and 49.3% by a whole ~1.0°, and **0.0% by half a beam**. `scan_test`
+  averaging 20 scans per beam is what made a coin flip look like a rotation —
+  and why removing 0.544° left the residual 2.5x worse than Gazebo's instead of
+  closing it.
 
-1. Park at several headings and check whether the offset is constant **in the
-   sensor frame** (an indexing convention) or **varies with heading** (a
-   mounting or tf error). That one experiment splits the two causes.
-2. Then read `horizontalResolution` and the azimuth-to-index mapping in
-   `turtlebot3_isaacsim`'s RTX lidar profile
-   (`models/lidar_configs/turtlebot3_lds.json`) against what the OmniGraph
-   publishes.
+### What is left, and it is a decision rather than an experiment
 
-Deferred deliberately on 2026-09-18: it is a perception-layer bias of half a
-beam, and the actuation layer and the odometry contract come first.
+Nothing has been changed. The half beam itself is structural to the node — a
+bin labelled with its lower edge is half an increment low for *any* ray
+placement, and shifting `azimuthRange` moves labels and edges together.
+
+What *can* go is the coin flip. `startAzimuthOffsetDeg = 0.5` plants each ray
+in the middle of its own bin: measured, the error becomes a **constant
++0.4998°** with per-beam scatter down **34x** (0.4888° → 0.0143°), same bias,
+no randomness. It should also take out a chunk of the excess `/scan` noise
+(`noise_spread_mean` 0.05584 against Gazebo's 0.02991).
+
+Two things to settle before doing it:
+
+1. It belongs in `turtlebot3_isaacsim`, which owns the lidar profile. Putting
+   the number on this side would be a second source of truth for the Isaac
+   backend.
+2. It trades zero-mean angular noise for a constant angular bias. Which of
+   those AMCL and slam_toolbox would rather have is a question about the
+   consumers, and is worth answering with the three-map comparison rather than
+   assumed.
 
 ## Next steps, in order
 
@@ -389,8 +406,10 @@ beam, and the actuation layer and the odometry contract come first.
    SLAM map into `worlds/<name>/map/<name>.yaml`.
 6. **The first real drive-to-goal**, which is still unrecorded — then the
    three-map comparison from section 3.
-7. **Isaac's half-beam lidar rotation** — section 6 above. One experiment
-   splits indexing convention from mounting error; deferred, not forgotten.
+7. ~~**Isaac's half-beam lidar rotation** — section 6 above. One experiment
+   splits indexing convention from mounting error.~~ **Diagnosed 2026-09-18**:
+   nothing is rotated, and the error is 0 or one whole beam per ray rather than
+   half of one. What remains is the decision in section 6, not an experiment.
 
 ## Not urgent: making the robot's address stop being a variable
 

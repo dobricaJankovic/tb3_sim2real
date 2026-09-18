@@ -118,7 +118,7 @@ Its origins differ — Gazebo's P3D is world-absolute, Isaac's is relative to th
 spawn pose (verified: spawned at `(-2.0, -0.5)`, reads `(-0.0, -0.0)`) — so
 consumers use deltas.
 
-### Isaac Sim's lidar is rotated by half a beam
+### Isaac Sim's lidar is not rotated — every beam is 0 or 1 beam off
 
 Measured 2026-09-17 with `ros2 run tb3_bringup scan_test`, against ranges
 ray-cast from `worlds/small_office/world.yaml` — no reference scan, no
@@ -129,11 +129,31 @@ hand-measured room.
 | gazebo | **+0.000°** | 0.00242 m |
 | isaacsim | **+0.544°** | 0.00608 m, from 0.01509 |
 
-0.544° is 0.54 of one 1.0° beam. Half a bin points at a beam-indexing
-convention rather than a mounting error, but that is a hint and **not a
-diagnosis** — nothing has been changed. Small, systematic, and it biases every
-scan match slightly. Deferred deliberately; the test that would settle it is in
-`docs/roadmap.md` section 6.
+That 0.544° was read as a half-beam rotation for a day. It is not one.
+Diagnosed 2026-09-18 by probing the sensor directly:
+`docs/worknotes/2026-09-18-lidar-half-beam.md`.
+
+With the profile's noise off, the azimuth the sensor reports and the azimuth
+the geometry implies agree to **0.0000°**. The rays are aimed correctly. They
+also fire at exactly integer degrees — and `ROS2PublishLaserScan` bins a return
+by `floor((azimuth - azimuthRange[0]) / horizontalResolution)` and then labels
+each bin with its **lower edge**, putting its bin boundaries at exactly the
+same integer degrees. **Every ray lands exactly on a boundary**, and the
+profile's own `azimuthErrorStd` decides which side.
+
+So over 4320 rays, **50.7% are off by ~0.0° and 49.3% by a whole ~1.0°, and
+0.0% by anything in between.** Half a beam is the mean of a coin flip, the same
+way "under-rotates by 30%" was the mean of a chattering wheel. `scan_test`
+averages 20 scans per beam, which is what turned the coin flip into a clean
+0.544°; the residual never closing to Gazebo's 0.00242 m is the tell that no
+single offset could remove it.
+
+Nothing has been changed. `startAzimuthOffsetDeg = 0.5` in the profile would
+make the error a constant +0.4998° instead of a coin flip — 34x less per-beam
+scatter, same bias — but the half beam itself is structural to the node, the
+profile belongs to `turtlebot3_isaacsim`, and trading angular noise for angular
+bias is a question about AMCL and slam_toolbox rather than about the sensor.
+See `docs/roadmap.md` section 6.
 
 ### Materials, and a fidelity bug in Gazebo too
 
