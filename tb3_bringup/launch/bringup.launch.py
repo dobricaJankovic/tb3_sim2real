@@ -30,7 +30,10 @@ drive manually instead of running Nav2, use a second terminal: `ros2 run
 turtlebot3_teleop teleop_keyboard` or `ros2 run tb3_bringup drive_test`.
 
 There is no `map:=` — a map lives in `worlds/<name>/map/` or it has not been
-made yet, and `slam:=true` is how it gets made.
+made yet, and `slam:=true` is how it gets made. There is no `initial_pose:=`
+either: under `nav:=true` AMCL starts at the manifest's `spawn:` on every
+backend, so no run begins with a human clicking in RViz (see
+`pin_initial_pose`).
 
 OpaqueFunction rather than IfCondition, so the backend argument is a plain
 Python string we can branch on. That also lets us derive use_sim_time from the
@@ -38,7 +41,9 @@ backend instead of making the operator remember it.
 """
 
 import os
+import tempfile
 
+import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
@@ -54,6 +59,54 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 from tb3_bringup import worlds
+
+
+def pin_initial_pose(params, world):
+    """Write a params file with AMCL's initial pose set from the manifest.
+
+    Without this, every Nav2 run needs a human to click "2D Pose Estimate" in
+    RViz — a few centimetres and a few degrees of INDEPENDENT RANDOM ERROR per
+    run, landing directly in goal_err_m, path_ratio and elapsed_s, which are
+    the numbers the experiments compare. It cannot be separated from the
+    sim-to-real gap afterwards. docs/roadmap.md §1 has the alternatives and
+    why global localization is not the experimental default here.
+
+    AMCL's own parameters, not a `/initialpose` publish: the publish races
+    AMCL's activation, and that race is what swallowed the pose during the
+    2026-09-16 hardware test.
+
+    A temporary COPY, so `config/nav2_params.yaml` stays verbatim upstream —
+    the same move, for the same reason, as `with_ground_truth()` in
+    backends/gazebo.launch.py. Written here rather than with nav2_common's
+    `RewrittenYaml`, which cannot do it: on Humble `substitute_params` walks
+    the paths the source file ALREADY HAS (`pathify`) and rewrites only those,
+    so a dotted path to an absent key is silently a no-op. All four of these
+    are absent from upstream's file. The audit that put RewrittenYaml in
+    docs/experiment-plan.md B5 got this wrong, and the failure it would have
+    produced is the invisible kind: the launch succeeds, the file is written,
+    and AMCL waits for a mouse anyway.
+
+    Nothing downstream changes: localization_launch.py wraps whatever path it
+    is handed in its own RewrittenYaml for use_sim_time.
+
+    On backend:=real this is only as true as the floor marker: the robot has to
+    START at the manifest's spawn, or AMCL begins confidently wrong. The marker
+    is part of the protocol, not a convenience (docs/experiment-plan.md B5).
+    """
+    with open(params) as f:
+        data = yaml.safe_load(f)
+    x, y, _z, yaw = world.spawn
+    amcl = data.setdefault('amcl', {}).setdefault('ros__parameters', {})
+    amcl['set_initial_pose'] = True
+    # z and the other two rotations are not offered: the manifest's spawn z is
+    # a spawn HEIGHT for a simulator, and AMCL localises in the plane.
+    amcl['initial_pose'] = {'x': float(x), 'y': float(y), 'z': 0.0,
+                            'yaw': float(yaw)}
+    out = tempfile.NamedTemporaryFile(
+        mode='w', suffix='.yaml', prefix='tb3_nav2_params_', delete=False)
+    yaml.safe_dump(data, out)
+    out.close()
+    return out.name
 
 
 def setup(context, *args, **kwargs):
@@ -161,7 +214,7 @@ def setup(context, *args, **kwargs):
                 f'  (There is no map:= argument. A map lives in its world\'s '
                 f'directory or it does not exist — see worlds/README.md.)')
         stack.append(inc(nav2('localization_launch.py'),
-                         map=map_yaml, params_file=params))
+                         map=map_yaml, params_file=pin_initial_pose(params, world)))
 
     if nav or slam:
         # Under slam:=true this runs alongside slam_toolbox rather than

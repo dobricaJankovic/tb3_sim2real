@@ -7,10 +7,17 @@ runs on real, gazebo and isaacsim without knowing which it is talking to — it
 publishes /cmd_vel and reads /odom, both of which every backend is contracted to
 provide.
 
-    ros2 run tb3_bringup drive_test --ros-args -p label:=gazebo -p out:=/tmp/g.json
+    ros2 run tb3_bringup drive_test --ros-args -p label:=gazebo \
+        -p out:=measurements/<date>_drive_gazebo.json \
+        -p bag_dir:=<somewhere>/<date>_drive_gazebo
 
 It is open loop on purpose. Nav2 would correct exactly the errors we are trying
 to measure.
+
+A rosbag is recorded alongside the JSON whenever `bag_dir` is set, and the
+experiments should always set it: the summary below is DERIVED, and a metric
+nobody thought of on the night of the run is only recoverable from the raw
+messages. Topics and the root-ownership trap: `bagging.py`.
 
 It records the drive chain at three points, so that a discrepancy can be
 attributed rather than just noticed:
@@ -39,6 +46,8 @@ from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import JointState
+
+from tb3_bringup.bagging import DRIVE_TOPICS, start_bag, stop_bag
 
 # name, linear.x (m/s), angular.z (rad/s), seconds.
 #
@@ -127,6 +136,7 @@ class DriveTest(Node):
         self.declare_parameter('label', 'unknown')
         self.declare_parameter('out', '')
         self.declare_parameter('sequence', 'default')
+        self.declare_parameter('bag_dir', '')
         self.label = self.get_parameter('label').value
         self.out = self.get_parameter('out').value
         name = self.get_parameter('sequence').value
@@ -403,11 +413,17 @@ class DriveTest(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = DriveTest()
+    # Started before the first command and stopped after the last, so the bag
+    # brackets the whole sequence including the settle phases -- drift at rest
+    # is only separable from drift under motion if both are in the recording.
+    bag_dir = node.get_parameter('bag_dir').value
+    bag = start_bag(bag_dir, DRIVE_TOPICS)
     try:
         node.run()
     except (KeyboardInterrupt, SystemExit):
         pass
     finally:
+        stop_bag(bag, bag_dir)
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

@@ -17,17 +17,14 @@ says both how big the plant error is and how much of it survives to the task.
 
 Per goal it records success, time on the simulator's clock, path length against
 the straight-line distance, final position and heading error, how many recovery
-behaviours fired, and the closest it came to an obstacle. A rosbag is recorded
-alongside so that a metric nobody thought of tonight can be derived later
-without re-running the matrix.
+behaviours fired, and the closest it came to an obstacle. With `bag_dir` set a
+rosbag is recorded alongside, so that a metric nobody thought of tonight can be
+derived later without re-running the matrix -- the same recorder drive_test
+uses, in `bagging.py`.
 """
 
 import json
 import math
-import os
-import shutil
-import signal
-import subprocess
 import time
 
 import rclpy
@@ -41,6 +38,8 @@ from rclpy.parameter import Parameter
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import LaserScan
 from tf2_ros import Buffer, TransformListener
+
+from tb3_bringup.bagging import NAV_TOPICS, start_bag, stop_bag
 
 # x, y, yaw, in the map frame.
 #
@@ -296,39 +295,17 @@ class NavTest(Node):
         return report
 
 
-def start_bag(bag_dir):
-    """Record everything the run touches, so a forgotten metric is recoverable.
-
-    Cheap insurance: re-running the matrix costs a simulator boot per cell,
-    re-reading a bag costs nothing.
-    """
-    if not bag_dir or shutil.which('ros2') is None:
-        return None
-    if os.path.exists(bag_dir):
-        shutil.rmtree(bag_dir)
-    return subprocess.Popen(
-        ['ros2', 'bag', 'record', '-o', bag_dir,
-         '/odom', '/scan', '/cmd_vel', '/tf', '/tf_static', '/amcl_pose',
-         '/plan', '/behavior_tree_log', '/ground_truth/odom', '/joint_states',
-         '/clock'],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-
 def main(args=None):
     rclpy.init(args=args)
     node = NavTest()
-    bag = start_bag(node.get_parameter('bag_dir').value)
+    bag_dir = node.get_parameter('bag_dir').value
+    bag = start_bag(bag_dir, NAV_TOPICS)
     try:
         node.run()
     except (KeyboardInterrupt, SystemExit) as e:
         node.get_logger().error('nav_test: {}'.format(e))
     finally:
-        if bag is not None:
-            bag.send_signal(signal.SIGINT)
-            try:
-                bag.wait(timeout=20)
-            except subprocess.TimeoutExpired:
-                bag.kill()
+        stop_bag(bag, bag_dir)
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

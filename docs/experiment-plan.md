@@ -146,12 +146,12 @@ The workstation half of B1 needs no robot. Config and reasoning:
 `docs/roadmap.md` §2. Also check whether `ufw` is active — if it is, NTP needs
 a rule for the robot's subnet.
 
-## A7. The AMCL initial-pose fix — code now, pin later (optional here)
+## A7. The AMCL initial-pose fix — **done 2026-09-18**
 
-The implementation needs no robot and no room: it reads the world's own
-`spawn:`, so it can be written and verified on `turtlebot3_world` today. The
-floor marker and the `lab_room` manifest are what wait for the room, and the
-whole item is recorded in **B5**, where it blocks.
+Written and verified on `turtlebot3_world`, which needs neither robot nor room.
+The floor marker and the `lab_room` manifest are what wait for the room. Full
+account, including the `RewrittenYaml` claim that turned out to be false:
+**B5**.
 
 ---
 
@@ -238,31 +238,30 @@ landing directly in `goal_err_m`, `path_ratio` and `elapsed_s` — the exact
 numbers being compared. It cannot be separated from the sim-to-real gap
 afterwards.
 
-Nothing sets it today: no `/initialpose` publish, no `set_initial_pose`, so
-AMCL's default `false` leaves it waiting. Decision and alternatives:
+**The code half is done, 2026-09-18** — `pin_initial_pose()` in
+`bringup.launch.py`, on the `elif nav:` branch, on every backend. AMCL's own
+parameters, not a topic publish: the publish races AMCL's activation, and that
+race swallowed the pose in the 2026-09-16 test. Decision and alternatives:
 `docs/roadmap.md` §1.
 
-Use AMCL's parameter, not a topic publish — the publish races AMCL's activation,
-and that race swallowed the pose in the 2026-09-16 test. Verified against the
-installed `nav2_common/launch/rewritten_yaml.py`: it accepts dotted absolute
-paths **and** creates keys absent from the source file, so
-`config/nav2_params.yaml` stays verbatim upstream.
+**The plan said to do this with `nav2_common`'s `RewrittenYaml`, and that was
+wrong.** The audit claimed it creates keys absent from the source file via a
+dotted absolute path. It does not, on Humble: `substitute_params` walks the
+paths the file ALREADY HAS (`pathify`) and rewrites only those, so all four of
+these keys — absent from upstream's `nav2_params.yaml` — were silently dropped.
+The launch succeeded, a params file was written, and AMCL waited for a mouse
+anyway, with no error anywhere. `test_nav_pins_amcl_to_the_manifest_spawn`
+performs the rewrite and reads the result back, which is what caught it, and is
+why it checks the written file rather than the request.
 
-```python
-# bringup.launch.py, in the `elif nav:` branch
-from nav2_common.launch import RewrittenYaml
-x, y, z, yaw = world.spawn
-pinned = RewrittenYaml(source_file=params, param_rewrites={
-    'amcl.ros__parameters.set_initial_pose': 'true',
-    'amcl.ros__parameters.initial_pose.x':   f'{x:g}',
-    'amcl.ros__parameters.initial_pose.y':   f'{y:g}',
-    'amcl.ros__parameters.initial_pose.yaw': f'{yaw:g}',
-}, convert_types=True)
-stack.append(inc(nav2('localization_launch.py'), map=map_yaml, params_file=pinned))
-```
+What it does instead is write a temp copy of the params file with the four keys
+added — the same move, for the same reason, as `with_ground_truth()` in
+`backends/gazebo.launch.py`, so `config/nav2_params.yaml` stays verbatim
+upstream. Chaining is unaffected: `localization_launch.py` wraps whatever path
+it is handed in its own `RewrittenYaml` for `use_sim_time`.
 
-Chaining is safe: `localization_launch.py` wraps the result in its own
-`RewrittenYaml` for `use_sim_time`.
+Verified on `turtlebot3_world`, which needs no robot and no room. What still
+waits on the room is the `lab_room` manifest and the floor marker.
 
 **The physical half:** a floor marker in the real room at the manifest's
 `spawn:`. Without it the pinned pose is a lie and AMCL starts confidently
@@ -458,9 +457,10 @@ the checks this audit added:
   `param_substitutions`, and `RewrittenYaml` rewrites it at every depth — so
   the mixed `False`/`True`/`true` literals inside the stock params file are all
   overridden by the value `bringup.launch.py` derives from `backend:=`.
-- **`RewrittenYaml` can create keys that are absent from the source file**, via
-  dotted absolute paths. That is what makes B5 possible without editing
-  `nav2_params.yaml`.
+- ~~**`RewrittenYaml` can create keys that are absent from the source file**, via
+  dotted absolute paths.~~ **Wrong, and found wrong on 2026-09-18 by building
+  it.** On Humble it rewrites only paths the source file already has. B5 has
+  the detail and what replaced it.
 - **Geometry parity holds right now** — `check_worlds.py` 3/3 consistent.
 - **The launch interface is pinned** — 11 tests, 0.15 s, no GPU.
 - **The two simulators' lidar specs match** — 360 beams, 0.12-3.5 m, 0.01 m

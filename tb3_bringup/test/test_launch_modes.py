@@ -184,3 +184,54 @@ def test_backend_does_not_pin_its_own_physics_rate():
     assert forwarded(physics_hz='240.0')['physics_hz'] == '240.0'
     # The pass-through arguments must still all arrive.
     assert set(backend.PASS_THROUGH) <= set(forwarded())
+
+
+def test_nav_pins_amcl_to_the_manifest_spawn():
+    """AMCL starts where the manifest says, with nobody clicking in RViz.
+
+    The failure this pins is silent and expensive: with set_initial_pose unset
+    AMCL waits, every run needs a human to click "2D Pose Estimate", and the
+    few centimetres that click is off land in exactly the numbers the
+    experiments compare. docs/experiment-plan.md B5.
+
+    Performed for real and read back rather than inspected: this failure mode
+    is entirely silent. The first implementation used nav2_common's
+    RewrittenYaml, on an audit's word that it creates keys absent from the
+    source file. It does not -- it rewrites only paths the file already has --
+    so the launch succeeded, a params file was written, and AMCL waited for a
+    mouse anyway. Nothing reported anything. This test is what caught it.
+    """
+    import yaml
+
+    from tb3_bringup import worlds
+
+    mod = _bringup()
+    world = worlds.World.load('turtlebot3_world')
+    params = os.path.join(get_package_share_directory('tb3_bringup'),
+                          'config', 'nav2_params.yaml')
+    written = mod.pin_initial_pose(params, world)
+    with open(written) as f:
+        amcl = yaml.safe_load(f)['amcl']['ros__parameters']
+    x, y, _z, yaw = world.spawn
+
+    assert amcl['set_initial_pose'] is True
+    assert amcl['initial_pose']['x'] == pytest.approx(x)
+    assert amcl['initial_pose']['y'] == pytest.approx(y)
+    assert amcl['initial_pose']['yaw'] == pytest.approx(yaw)
+    # Everything else survives the rewrite: this is upstream's params file with
+    # four keys added, not a params file this repository now maintains.
+    assert amcl['robot_model_type'] == 'nav2_amcl::DifferentialMotionModel'
+
+
+def test_the_params_file_itself_is_never_edited():
+    """The rewrite exists so config/nav2_params.yaml stays verbatim upstream.
+
+    One params file, unconditional, is what keeps the sim-to-real gap from
+    being absorbed into per-backend tuning (docs/architecture.md). A pinned
+    pose written INTO that file would be the first edit.
+    """
+    params = os.path.join(get_package_share_directory('tb3_bringup'),
+                          'config', 'nav2_params.yaml')
+    with open(params) as f:
+        text = f.read()
+    assert 'set_initial_pose' not in text and 'initial_pose:' not in text
