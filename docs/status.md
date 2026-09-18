@@ -257,8 +257,10 @@ The 324-vs-307 gap is the no-return encoding, not the geometry: Isaac reports
 
 The `odom` frame does not start in the same place. Gazebo's diff-drive plugin
 puts `odom` at the world origin, so tf reads the spawn pose immediately; Isaac
-Sim's `IsaacComputeOdometry` puts `odom` at the robot, so tf reads zero at
-spawn. Both are valid odometry; AMCL resolves the difference into `map->odom`.
+Sim's `wheel_odometry` node starts its integration where the robot is, so tf
+reads zero at spawn — as `IsaacComputeOdometry` did before it, so this is
+unchanged by the 2026-09-18 odometry work. Both are valid odometry; AMCL
+resolves the difference into `map->odom`.
 It matters only if you compare raw `/odom` between backends without saying which
 frame you mean.
 

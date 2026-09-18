@@ -22,10 +22,10 @@ attributed rather than just noticed:
 The analytic omega is the ground truth for the first layer and needs no robot:
 the differential-drive kinematics are exact, so a joint that does not reach its
 own commanded velocity is broken on any backend. Ground truth for the second
-and third is the simulator's own body pose — /gazebo/model_states, and for
-Isaac Sim the chassis prim that IsaacComputeOdometry already reads. It is
-absent on the real robot, where those two layers collapse into one and are
-reported as such rather than faked.
+and third is the simulator's own body pose, published as /ground_truth/odom by
+both simulators — a P3D plugin on Gazebo, the chassis-prim node on Isaac Sim.
+It is absent on the real robot, where those two layers collapse into one and
+are reported as such rather than faked.
 """
 
 import json
@@ -291,7 +291,7 @@ class DriveTest(Node):
                   # nothing wrong.
                   'has_joint_states': self.joints is not None,
                   'ground_truth': '/ground_truth/odom' if self.truth is not None
-                                  else 'none (on isaacsim /odom IS the body pose)',
+                                  else 'none (no ground truth on hardware)',
                   'wheel_separation': WHEEL_SEPARATION,
                   'wheel_radius': WHEEL_RADIUS,
                   'sequence': results,

@@ -233,3 +233,36 @@
   believing a real-robot run is healthy — and prefer
   `ros2 run tf2_ros tf2_echo odom base_footprint`, which fails loudly on
   exactly this.
+
+- **`ros2` CLI commands return nothing, or die with
+  `xmlrpc.client.Fault: <Fault 1: "<class 'RuntimeError'>:!rclpy.ok()">`, while
+  the simulator is demonstrably running.**
+
+  The `ros2` CLI talks to a background daemon. `SIGKILL` on a pile of ROS
+  processes — `pkill -9 -f isaac-sim`, the usual way to clear a wedged
+  simulator — can take that daemon down with them and leave it in a state where
+  every later `ros2 topic list` fails. The failure is quiet in the worst way:
+  with `2>/dev/null` you get an empty list, which is indistinguishable from
+  "the simulator published nothing", and the natural conclusion is that the
+  thing you just changed is broken.
+
+  ```bash
+  ros2 daemon stop && ros2 daemon start     # usually enough
+  docker compose restart tb3_ros            # if it is not
+  ```
+
+  `restart` is safe: `/ws/install` lives in the container's filesystem and
+  survives it, so no rebuild is needed.
+
+  Two habits that avoid it entirely. **Stop a run with `SIGINT`, not
+  `SIGKILL`** — `kill -INT $(pgrep -f "ros2 launch")` lets launch tear its
+  children down in order, and leaves the daemon alone. And **gate readiness on
+  the log, not on the CLI**: `grep -q "simulation is playing" sim.log` needs no
+  DDS discovery at all, where `ros2 topic list` in a wait loop can fail for
+  either of two unrelated reasons and cannot tell you which.
+
+- **A wait loop on `ros2 topic echo --once` times out even though the topic is
+  live.** DDS discovery for a brand-new process can take longer than the
+  timeout you gave the command, so `timeout 3 ros2 topic echo /clock --once`
+  fails in a loop forever while the topic publishes at 40 Hz throughout. Give
+  discovery 10-15 s per attempt, or use the log-grep above.

@@ -120,8 +120,10 @@ class NavTest(Node):
         self.create_subscription(Odometry, 'odom', self._on_odom,
                                  QoSProfile(depth=20,
                                             reliability=ReliabilityPolicy.RELIABLE))
-        # /ground_truth/odom exists on the Gazebo backend only; on Isaac Sim
-        # /odom already IS the body pose and on the real robot neither does.
+        # /ground_truth/odom exists on BOTH simulators since 2026-09-18 --
+        # Gazebo from a P3D plugin, Isaac Sim from the chassis-prim node that
+        # used to feed its /odom -- and on no hardware, because there is no
+        # ground truth on a real robot.
         self.create_subscription(Odometry, '/ground_truth/odom',
                                  self._on_truth, 10)
         self.create_subscription(

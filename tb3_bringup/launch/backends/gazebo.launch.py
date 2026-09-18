@@ -38,11 +38,14 @@ from launch_ros.actions import Node
 # It is here because /odom on this backend is NOT the body pose. The
 # turtlebot3 diff-drive plugin integrates the wheel joints, so /odom and a
 # forward integration of /joint_states agree to five decimal places by
-# construction, and wheel slip is invisible in both. Isaac Sim needs no
-# equivalent: IsaacComputeOdometry reads the chassis prim, so its /odom already
-# IS the true pose. Measuring slip at all therefore requires this on the Gazebo
-# side -- and the asymmetry it exposes, that the two backends' /odom topics do
-# not mean the same thing, is worth more than the plugin.
+# construction, and wheel slip is invisible in both.
+#
+# Isaac Sim publishes the same topic, from the chassis-prim node that used to
+# feed its /odom until 2026-09-18. Both simulators therefore now carry a
+# drifting /odom and a true /ground_truth/odom, and mean the same thing by
+# each name. The origins still differ -- this plugin reports world-absolute
+# coordinates, Isaac's is relative to the spawn pose -- so consumers use
+# deltas.
 #
 # Loaded at spawn rather than by -s: gazebo_ros_state is a WORLD plugin, and
 # -s is the SYSTEM plugin loader, so it is accepted and silently never
