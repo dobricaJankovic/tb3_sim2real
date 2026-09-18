@@ -387,6 +387,11 @@ Two things to settle before doing it:
 
 ## Next steps, in order
 
+*Superseded for the hardware session by
+[`docs/experiment-plan.md`](experiment-plan.md), which orders this list against
+the two experiments and says which half needs the robot. The reasoning for each
+decision stays here.*
+
 1. **chrony on both machines.** Cheap, and it removes a whole class of ghost
    failure. Prerequisite for trusting any hardware measurement. *Surveyed
    2026-09-16 — the offset is measured and the config is written out in

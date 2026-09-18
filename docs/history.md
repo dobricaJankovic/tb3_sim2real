@@ -1970,3 +1970,81 @@ Same bias, no randomness, strictly better. Not applied: the profile belongs to
 `turtlebot3_isaacsim`, and trading zero-mean angular noise for a constant
 angular bias is a question about what AMCL and slam_toolbox prefer, which the
 three-map comparison should answer rather than an assumption.
+
+## 2026-09-18 — Pre-hardware audit, and the plan it produced
+
+The real robot arrives tomorrow. The whole repository was read against the two
+experiments it is about to run — open space open-loop, and Nav2 in a lab room
+built physically and copied into both simulators — looking for anything that
+would make those measurements not mean what they claim. Result:
+`docs/experiment-plan.md`, ordered and split by whether the robot is needed.
+
+### The one genuinely unverified thing
+
+**Gazebo's `/ground_truth/odom` has never been recorded.** Isaac Sim's is
+proven by `measurements/2026-09-18_isaacsim_wheel_odom.json`, which carries
+`truth_d` rows. Every Gazebo `drive_test` file in `measurements/` predates the
+P3D plugin and has none — so the plugin in `backends/gazebo.launch.py` has been
+written and never exercised end to end, and its own comment names the failure
+mode it would hit ("accepted and silently never attaches"). If it is not
+attaching, the wheel → body layer — slip, the whole point of experiment 1 —
+cannot be measured on Gazebo at all. First task in the plan.
+
+### The two that block the hardware session
+
+**Nothing sets AMCL's initial pose**, on any backend — no `/initialpose`
+publish, no `set_initial_pose`, so the default `false` leaves it waiting for a
+human with a mouse. That click is a few cm and a few degrees of *independent
+random error per run*, landing in exactly the metrics being compared. Roadmap §1
+decided this; it was never built. The fix is written out in the plan: AMCL's own
+parameter via a chained `RewrittenYaml` — verified that `nav2_common`'s
+implementation accepts dotted absolute paths *and* creates keys absent from the
+source file, so `nav2_params.yaml` stays verbatim upstream.
+
+**Clock skew, 157 ms, still unfixed** (roadmap §2), on a Pi with no RTC that
+steps rather than drifts. Prerequisite for believing any hardware number.
+
+### Smaller findings
+
+- `drive_test` records no rosbag; only `nav_test` does. Experiment 1 is
+  described as "record rosbags" and has no supported path to one.
+- RViz never receives `use_sim_time` — `common/rviz.launch.py` declares it and
+  `nav2_bringup/rviz_launch.py` has no argument to receive it. Cosmetic, except
+  the warning it produces is *the same text* as real Pi/workstation clock skew,
+  so it will confuse the diagnosis of the item above.
+- Isaac's `/scan` measured 3.5 Hz against Gazebo's 5.0 and the profile's 5.0.
+  Pre-240 Hz, possibly wall-clock. Re-measure in sim time: a scan rate is
+  evidence per metre, so a 30% deficit would put a sampling difference inside
+  the perception comparison.
+- `docs/architecture.md`'s contract table names `ld08_driver` (LDS-02) for the
+  real `/scan` while `.env` says LDS-01. One is wrong; if it is the LDS-02, its
+  8 m range against both simulators' 3.5 m breaks perception parity silently.
+
+### Friction: the decision that went the other way
+
+Floor friction is **not** in the single source of truth. Gazebo: stock
+`ground_plane` at mu 100/50 under wheels at mu **100000**. Isaac: an authored
+GroundPlane at 1.0/1.0. `world.yaml` has no `physics:` block and
+`build_world.py` writes no `<surface>`. So "Gazebo cannot show slip" rests on
+an undeclared default — and mu = 1e5 is not a physical value, it is a
+don't-slip sentinel.
+
+The audit proposed declaring the values and changing nothing. **Overruled, and
+correctly:** measure the real robot first, and if its slip sits far from both
+simulators, tuning friction is on the table — it makes no sense to report a
+large divergence as a finding when one arbitrary sentinel parameter explains
+it. The rule that survives is the narrower one: never tune a backend to match
+*another backend*. Parameterising from a value measured on hardware is what the
+240 Hz physics rate already did.
+
+### Deliberately closed
+
+The `/scan` angular convention differs three ways — Isaac starts its sweep at
+the rear, and Gazebo's angular scale is 0.23% wide because upstream's SDF says
+`6.28` rather than 6.283185, accumulating to 0.81° by the last beam. **Not
+being fixed and not going in the thesis**: Nav2, AMCL and slam_toolbox all
+reconstruct the angle from `angle_min + i*increment` and are indifferent. The
+one consequence kept: no analysis script may index `ranges[i]` to mean a
+direction, because `ranges[0:30]` is "in front" on Gazebo and "behind" on
+Isaac. Same for the three no-return encodings (confirm on hardware, change
+nothing) and Gazebo's 1 mm-low lidar.

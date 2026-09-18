@@ -1,5 +1,10 @@
 # The experiment
 
+**The ordered work list that produces these numbers is
+[`docs/experiment-plan.md`](experiment-plan.md)** — what can be done without
+the robot, what needs it, and the findings deliberately left alone. This file
+is where its output lands.
+
 This is a structure to drop results into, not a results document. It exists so
 a night's or a session's numbers land in tables that already have the right
 shape, rather than in a pile that has to be re-organized before it means
