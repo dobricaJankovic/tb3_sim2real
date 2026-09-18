@@ -2048,3 +2048,55 @@ one consequence kept: no analysis script may index `ranges[i]` to mean a
 direction, because `ranges[0:30]` is "in front" on Gazebo and "behind" on
 Isaac. Same for the three no-return encodings (confirm on hardware, change
 nothing) and Gazebo's 1 mm-low lidar.
+
+### Later that day: the pin that would have undone it all
+
+Asked whether any docs were stale, and the answer turned out not to be a doc.
+`tb3_sim2real.repos` still pinned `turtlebot3_isaacsim` to
+`fix-map-mirroring-add-small-worlds` — a feature branch abandoned on 09-15 and
+eight commits behind by then. The pinned ref has **no `nodes/wheel_odometry.py`
+at all** and defaults `physics_hz` to **60.0**, so `scripts/workspace.sh` on a
+fresh machine hands back Isaac's `/odom` as the chassis prim and the wheels
+chattering at 60 Hz: both defects of the previous two days, restored silently,
+with nothing to read as an error except numbers that stop matching
+`docs/status.md`.
+
+**This is the failure this repository exists to prevent, arriving through the
+pin rather than through a copied tree.** The copy was removed on 09-14 because
+it went four worlds and an Isaac Sim version stale; a pin that names a dead
+branch is the same mistake with a smaller diff. Now `humble`, with the tip SHA
+recorded in the comment for anyone who needs to reproduce a run exactly.
+
+The rest were genuine doc staleness, all of one kind — **`docs/status.md` had
+been amended in place under an old date heading**, so new findings were appended
+while `Known open` was never revisited. It ended up contradicting itself twice:
+line 179 said `isaacsim_bringup` moved to 6.1.0 while line 343 said it was
+pinned to 6.0.1, and it claimed two worlds while announcing the third a few
+lines above. Headings are dated individually now, and the top one says so.
+
+The dangerous one was `worlds/README.md`, which CLAUDE.md calls the
+architectural core and which still opened with `clone_world.py --map ... --name
+lab_room` as the way to build a room — the exact task about to be done, by the
+path retired in roadmap §3a. It now carries a banner saying so, and saying what
+is still true: everything from "Why one mesh and not boxes" onward applies
+unchanged to an authored world. It is only the first step, deriving the manifest
+from a recorded map, that is out.
+
+### On why the docs are long
+
+Measured rather than guessed: the wheel-chatter story is told in seven files,
+240 Hz in six, `/ground_truth/odom` in five. Nothing links; everything restates.
+That is the mechanism behind every staleness above — a fact changes in one place
+and rots in four. The *reasoning-heavy* style is not the problem and is worth
+keeping; the retelling is. `docs/experiment-plan.md` was itself guilty on the
+day it was written (it restated roadmap §2's chrony config verbatim) and now
+links instead: 3948 words to 3358, with the whole chrony section replaced by a
+pointer.
+
+Also worth recording, because it cost a merge: `measurements/bags/` was
+**root-owned**, written by `ros2 bag record` inside the container. Git could not
+delete the files on checkout, so they survived as untracked and blocked a
+fast-forward, and neither `rm` nor `mv` worked from the host. The fix is to move
+them from inside the container. Whatever gives `drive_test` a `bag_dir` must not
+recreate this — `docker-compose.yml`'s `ros_logs` comment already warned about
+exactly this and was not heeded.

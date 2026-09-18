@@ -68,6 +68,27 @@ A whole registry of your own works too — point `TB3_WORLDS` at it before
 
 # Cloning a real environment
 
+> **RETIRED, 2026-09-16. Do not build on this.** `scripts/clone_world.py` and
+> the map-extrusion path in this chapter are **not considered good** and are
+> expected to be removed rather than extended — `docs/roadmap.md` §3a. The lab
+> world is to be **authored**: a manifest of primitives written from tape-measure
+> dimensions, the way `worlds/small_office/world.yaml` is, then
+> `scripts/build_world.sh`. The step-by-step is `docs/experiment-plan.md` B6.
+>
+> The `clone_world.py` command below still runs and still round-trips; that is
+> not the objection. The objection is which direction is the source of truth. A
+> world derived *from* a SLAM map inherits SLAM's error into its geometry, and
+> then `check_worlds.py`'s footprint test is comparing a model against a picture
+> of itself — which destroys the one check that can notice the model drifting
+> away from the real room. See also `scripts/make_map.py`'s docstring, which
+> refuses the same round trip from the other end.
+>
+> **The methodology below is kept, and it is still the architectural core of
+> this repository:** one manifest, both simulators generated from it, meshes
+> shared byte-for-byte, drift checked mechanically. Every section from "Why one
+> mesh and not boxes" onward applies unchanged to an authored world. It is only
+> the *first* step — deriving the manifest from a recorded map — that is out.
+
 The hard part of sim-to-real is not the launch files. It is getting the room the
 robot is actually in into two simulators, and keeping it there.
 

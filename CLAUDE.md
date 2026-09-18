@@ -43,7 +43,8 @@ worlds/<name>/        world registry. world.yaml is the source of truth; the
 scripts/              workspace.sh (vcs import), build_images.sh,
                       build_world.py / build_world_usd.py / build_world.sh (the
                       generators), clone_world.py (a real room's Nav2 map -> a
-                      world), make_map.py (the inverse, for a world that was
+                      world; RETIRED, see roadmap 3a -- author a manifest
+                      instead), make_map.py (the inverse, for a world that was
                       DESIGNED -- read its docstring before using it),
                       dae_to_obj.py (Isaac Sim reads no Collada),
                       save_map.py (a SLAM map -> worlds/<name>/, the only

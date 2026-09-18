@@ -2,9 +2,15 @@
 
 What is verified, and what is not. Start here before claiming something works.
 
-## Verified on 2026-09-15
+## Verified 2026-09-15 to 2026-09-18
 
-### Open-loop kinematics, one instrument, both backends
+**Each subsection below carries its own date, and they are not all the same
+day.** This heading said "2026-09-15" until 2026-09-18 while findings from the
+17th and the 18th were appended under it — which is how the two contradictions
+that used to sit in "Known open" survived. When you add a finding here, date it
+in its own heading.
+
+### Open-loop kinematics, one instrument, both backends — 2026-09-15
 
 `ros2 run tb3_bringup drive_test`, `world:=empty_stage`, identical `/cmd_vel`
 sequence, two runs per backend. Phases are timed on the **simulator's** clock.
@@ -34,7 +40,7 @@ sequence, two runs per backend. Phases are timed on the **simulator's** clock.
 - Isaac veers on the straight (-0.0085 / -0.0158 rad of yaw) where Gazebo holds
   0.00000 exactly.
 
-### The one real defect: Isaac Sim's wheels chatter
+### The one real defect: Isaac Sim's wheels chatter — 2026-09-15, resolved 2026-09-18
 
 **Superseded 2026-09-17.** The measurements below are correct and reproduce;
 the diagnosis that followed them was wrong. Full write-up:
@@ -92,7 +98,7 @@ skid does slide, and Gazebo cannot show it at all — its wheels carry
 same reason: a sphere contacts at a point, and the expectation is that Isaac is
 the backend that resembles the real robot here.
 
-### Isaac Sim's `/odom` is now integrated from the wheels
+### Isaac Sim's `/odom` is now integrated from the wheels — 2026-09-18
 
 Changed and verified 2026-09-18
 (`measurements/2026-09-18_isaacsim_wheel_odom.json`). It used to be the chassis
@@ -118,7 +124,7 @@ Its origins differ — Gazebo's P3D is world-absolute, Isaac's is relative to th
 spawn pose (verified: spawned at `(-2.0, -0.5)`, reads `(-0.0, -0.0)`) — so
 consumers use deltas.
 
-### Isaac Sim's lidar is not rotated — every beam is 0 or 1 beam off
+### Isaac Sim's lidar is not rotated: every beam is 0 or 1 beam off — 2026-09-17, diagnosed 2026-09-18
 
 Measured 2026-09-17 with `ros2 run tb3_bringup scan_test`, against ranges
 ray-cast from `worlds/small_office/world.yaml` — no reference scan, no
@@ -155,7 +161,7 @@ profile belongs to `turtlebot3_isaacsim`, and trading angular noise for angular
 bias is a question about AMCL and slam_toolbox rather than about the sensor.
 See `docs/roadmap.md` section 6.
 
-### Materials, and a fidelity bug in Gazebo too
+### Materials, and a fidelity bug in Gazebo too — 2026-09-15
 
 Isaac Sim rendered every stage grey because the manifest's only statement about
 colour was `Gazebo/White` — an Ogre script name, meaningful to Gazebo alone.
@@ -170,7 +176,7 @@ Verified by rendering both backends headless (`scripts/snapshot.py`,
 `scripts/snapshot_gazebo.py`) and by resolving `ComputeBoundMaterial` on every
 Gprim: 12/12 on `small_office`, 15/15 on `turtlebot3_world`.
 
-### New in the registry
+### New in the registry — 2026-09-15
 
 - **`small_office`** — 6.0 x 5.0 m room, five boxes plus a partition, seven mesh
   props from six OBJs (AWS RoboMaker, MIT-0). Builds for both backends; USD
@@ -178,7 +184,8 @@ Gprim: 12/12 on `small_office`, 15/15 on `turtlebot3_world`.
   manifest placements, to four decimals.
 - **`isaacsim_bringup` moved to the `IsaacSim-6.1.0` tag**, matching the
   installed simulator. The blocker was fixed at source in `turtlebot3_isaacsim`
-  (`AnyLaunchDescriptionSource` + `run_isaacsim.launch.xml`). **Not pushed.**
+  (`AnyLaunchDescriptionSource` + `run_isaacsim.launch.xml`). Pushed; confirmed
+  on `origin/humble` 2026-09-18.
 - **`scripts/dae_to_obj.py` now applies visual-scene node transforms.** It used
   to warn and skip them, which on `gazebo_models`' `cafe_table.dae` put the
   tabletop flat on the floor while the overall height was only 38 mm out — an
@@ -242,7 +249,10 @@ The 324-vs-307 gap is the no-return encoding, not the geometry: Isaac reports
   about its x axis. All three fail, each naming what is wrong.
 - **`scripts/clone_world.py`** — round-tripped: the stock `turtlebot3_world`
   map cloned into a world directory scores 100% of the map modelled and 0% of
-  the model absent from the map at the burger's 0.182 m beam height.
+  the model absent from the map at the burger's 0.182 m beam height. *The
+  measurement stands; the path is **retired** as of 2026-09-16 and is not how
+  the lab world gets built — `docs/roadmap.md` §3a, `docs/experiment-plan.md`
+  B6. Read this row as "it worked", not as "use it".*
 - **All four `nav` / `slam` combinations on gazebo**, measured 2026-09-16 by
   `ros2 node list` 34 s after launch. Neither flag: the backend and
   `robot_state_publisher`, nothing else. `nav:=true`: `amcl`, `map_server` and
@@ -340,18 +350,11 @@ else** — `docker compose restart tb3_ros` is the reliable reset, and costs a
   removed 2026-09-16 because it made the wrong thing (tuning away the
   sim-to-real gap it exists to measure) convenient rather than impossible. See
   `docs/architecture.md`.
-- **`isaacsim_bringup` is pinned to `IsaacSim-6.0.1` while Isaac Sim is 6.1.0.**
-  The 6.1.0 tag reimplements `run_isaacsim.launch.py` as
-  `run_isaacsim.launch.xml` — argument for argument the same, but a different
-  name and source type — and `turtlebot3_isaacsim` includes it by the old name.
-  It is not a runtime mismatch: the package passes `install_path=/isaac-sim`,
-  which overrides the launcher's own `version` default, so the 6.0.1 launcher
-  starts the 6.1.0 install. Moving the pin forward is a two-line change in
-  `turtlebot3_isaacsim` (`AnyLaunchDescriptionSource` and the new filename) and
-  belongs in that repository. Reasoning is in `tb3_sim2real.repos`.
-- **The world registry has two worlds.** `turtlebot3_world` (upstream's arena,
-  generated from a manifest derived mechanically from `turtlebot3_gazebo`'s
-  `model.sdf`) and `empty_stage`. `turtlebot3_isaacsim` carries three more of
+- **The world registry has three worlds.** `turtlebot3_world` (upstream's
+  arena, generated from a manifest derived mechanically from
+  `turtlebot3_gazebo`'s `model.sdf`), `small_office` and `empty_stage`. None of
+  them is the room the robot is actually in; authoring that one is
+  `docs/experiment-plan.md` B6. `turtlebot3_isaacsim` carries three more of
   its own — the warehouse, a simple room and a kitchen — as stock Isaac Sim
   environments; adopting them here is an `artifacts: {mode: adopted}` manifest
   each, and needs a Gazebo representation before `world:=` would mean the same
