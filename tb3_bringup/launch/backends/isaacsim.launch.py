@@ -29,6 +29,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
+    GroupAction,
     IncludeLaunchDescription,
     OpaqueFunction,
 )
@@ -55,10 +56,22 @@ def include_simulator(context, pkg):
     physics_hz = LaunchConfiguration('physics_hz').perform(context)
     if physics_hz:
         arguments['physics_hz'] = physics_hz
-    return [IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(pkg, 'launch', 'isaacsim.launch.py')),
-        launch_arguments=arguments.items(),
+    # scoped + forwarding=False, and it is load-bearing. An
+    # IncludeLaunchDescription does NOT isolate launch configurations: every
+    # name declared in this file leaks into the included one, where it takes
+    # PRECEDENCE over that file's own DeclareLaunchArgument default. So an
+    # unset `physics_hz` declared here as '' does not mean "use the package
+    # default" -- it overrides it, and the simulator dies on
+    #   argument --physics-hz: expected one argument
+    # Everything the included file needs is therefore passed explicitly above.
+    return [GroupAction(
+        [IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(pkg, 'launch', 'isaacsim.launch.py')),
+            launch_arguments=arguments.items(),
+        )],
+        scoped=True,
+        forwarding=False,
     )]
 
 

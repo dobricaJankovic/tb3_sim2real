@@ -169,7 +169,15 @@ def test_backend_does_not_pin_its_own_physics_rate():
                     perform_substitutions(context, action.default_value)
                     if action.default_value else '')
         context.launch_configurations.update(overrides)
-        include, = backend.include_simulator(context, pkg)
+        group, = backend.include_simulator(context, pkg)
+        # Scoping is the invariant, not a detail: without it every argument
+        # declared in the backend file leaks into turtlebot3_isaacsim's own
+        # launch file and OVERRIDES its defaults, which is how an unset
+        # physics_hz once reached the simulator as `--physics-hz ''` and
+        # killed it on startup.
+        assert getattr(group, '_GroupAction__scoped') is True
+        assert getattr(group, '_GroupAction__forwarding') is False
+        include, = getattr(group, '_GroupAction__actions')
         return dict(include.launch_arguments)
 
     assert 'physics_hz' not in forwarded()

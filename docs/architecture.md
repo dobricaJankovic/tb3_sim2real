@@ -197,8 +197,9 @@ All three backends must present an identical surface to Nav2.
 | | real | gazebo | isaacsim |
 |---|---|---|---|
 | `/scan` | ld08_driver | gazebo lidar plugin | `ROS2PublishLaserScan` |
-| `/odom` | turtlebot3_node | diff_drive plugin | `ROS2PublishOdometry` |
-| tf `odom→base_footprint` | turtlebot3_node | diff_drive plugin | `ROS2PublishRawTransformTree` |
+| `/odom` | turtlebot3_node | diff_drive plugin | `wheel_odometry` node |
+| tf `odom→base_footprint` | turtlebot3_node | diff_drive plugin | `wheel_odometry` node |
+| `/ground_truth/odom` | **nothing — there is none** | P3D plugin | `IsaacComputeOdometry` |
 | `/joint_states` | turtlebot3_node | joint_state plugin | `ROS2PublishJointState` |
 | `/cmd_vel` | turtlebot3_node | diff_drive plugin | `ROS2SubscribeTwist` |
 | `/clock` | — (wall time) | gazebo_ros_init | `ROS2PublishClock` |
@@ -211,6 +212,34 @@ That last row is the design's load-bearing decision. The URDF is the single
 source of truth for the kinematic tree, so each backend supplies only a *raw*
 `odom→base_footprint` transform and the two sims cannot drift from the real
 robot's geometry.
+
+### `/odom` means the same thing on all three, and that took work
+
+All three integrate it from the wheels, so all three **drift**. Isaac Sim did
+not until 2026-09-18: `IsaacComputeOdometry` reads the chassis prim, so its
+`/odom` was the robot's true pose. That is what NVIDIA's reference graph wires
+up and there is no stock encoder-odometry node to wire instead, so the package
+had inherited it.
+
+Odometry that cannot drift is not a harmless luxury. Nav2's entire job above
+`odom` is to correct that drift; a backend without it makes localisation
+unrealistically easy on exactly one of the three, which is a sim-to-real gap
+manufactured by the apparatus. It also concealed real wheel slip — `/odom` now
+over-reports a pivot by **4.8%** and a straight line by 0.08%, which is what a
+burger pivoting on two wheels and a plastic skid actually does.
+
+The true pose is still available on `/ground_truth/odom`, on both simulators,
+and **on neither the real robot nor any hardware** — which is the point: the
+three-layer decomposition in `docs/experiment.md` (command → wheel → body →
+odom) is a measurement only a simulator can provide, not a workaround for one.
+
+Two asymmetries worth knowing before using it. Gazebo's `/odom` is integrated
+from the wheels *by the same plugin that drives them*, so it agrees with a
+forward integration of `/joint_states` by construction and slip is invisible in
+it; Isaac's is computed by a separate node from the published joint states.
+And the ground-truth origins differ — Gazebo's P3D is world-absolute, Isaac's
+is relative to the spawn pose — so consumers use deltas, never absolute
+positions.
 
 ## Build order
 

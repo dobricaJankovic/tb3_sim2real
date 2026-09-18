@@ -143,13 +143,19 @@ class DriveTest(Node):
                                  QoSProfile(depth=50,
                                             reliability=ReliabilityPolicy.RELIABLE))
         self.create_subscription(JointState, 'joint_states', self._on_joints, 50)
-        # Ground truth for the wheel->body layer, where there is any. The
-        # Gazebo backend publishes it from a P3D plugin; Isaac Sim does not
-        # need to, because IsaacComputeOdometry reads the chassis prim and its
-        # /odom already IS the body pose. Subscribing unconditionally is
-        # correct on all three: a backend that does not publish it simply
-        # leaves the channel empty, and the report says which happened rather
-        # than leaving a reader to assume.
+        # Ground truth for the wheel->body layer, where there is any. BOTH
+        # simulators publish it here since 2026-09-18: Gazebo from a P3D
+        # plugin, Isaac Sim from the IsaacComputeOdometry node that used to
+        # feed /odom. On Isaac that /odom was the chassis prim -- the true pose
+        # -- which is not what /odom means on the real robot or in Gazebo,
+        # where it is integrated from the wheels and drifts; it now is, and the
+        # true pose moved here. The real robot publishes nothing on this topic
+        # and cannot: there is no ground truth on hardware, which is the whole
+        # reason the decomposition is a simulator-only measurement.
+        #
+        # The two simulators' ground-truth ORIGINS need not agree -- P3D
+        # reports world coordinates, Isaac's is relative to the spawn pose --
+        # so consumers use deltas, never absolute positions.
         self.create_subscription(Odometry, '/ground_truth/odom',
                                  self._on_truth, 10)
 

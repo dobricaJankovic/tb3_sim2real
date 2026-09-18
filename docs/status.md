@@ -92,6 +92,32 @@ skid does slide, and Gazebo cannot show it at all — its wheels carry
 same reason: a sphere contacts at a point, and the expectation is that Isaac is
 the backend that resembles the real robot here.
 
+### Isaac Sim's `/odom` is now integrated from the wheels
+
+Changed and verified 2026-09-18
+(`measurements/2026-09-18_isaacsim_wheel_odom.json`). It used to be the chassis
+prim — the true pose — because that is what `IsaacComputeOdometry` reads and
+what NVIDIA's reference graph wires up. All three backends now integrate
+`/odom` from the wheels, and all three drift.
+
+Measured against `/ground_truth/odom` in the same run:
+
+| | `/odom` (wheel) | ground truth | odometry error |
+|---|---|---|---|
+| `rotate` `wz = 0.5`, yaw | 2.2501 rad | 2.1464 rad | **+4.83%** |
+| `arc`, yaw | 1.2592 rad | 1.1918 rad | **+5.66%** |
+| `straight`, distance | 0.7367 m | 0.7361 m | +0.08% |
+
+Odometry over-reports every turn and is nearly exact in a straight line, which
+is wheel slip in a pivot — a real phenomenon, previously invisible because
+`/odom` could not be wrong. Gazebo cannot reproduce it at all: its wheels carry
+`mu = 100000` and its `/odom` comes from the same plugin that drives them.
+
+`/ground_truth/odom` now exists on **both** simulators and on neither hardware.
+Its origins differ — Gazebo's P3D is world-absolute, Isaac's is relative to the
+spawn pose (verified: spawned at `(-2.0, -0.5)`, reads `(-0.0, -0.0)`) — so
+consumers use deltas.
+
 ### Isaac Sim's lidar is rotated by half a beam
 
 Measured 2026-09-17 with `ros2 run tb3_bringup scan_test`, against ranges
