@@ -58,10 +58,56 @@ source is the wheel's cylindrical collider, which neither PhysX nor MuJoCo
 rolls exactly. A sphere of the same radius cuts the chatter 40x at the original
 timestep.
 
-Running PhysX at 480 Hz is shipped and fixes translation to within 1% at every
-speed; rotation improves from 48% to 88% at the worst point but does **not**
-meet the 1% target. Low rates are still the worst case, which is Nav2's regime
-for final alignment and in-place turns.
+**Shipped: PhysX at 240 Hz** (four sub-steps per rendered frame), measured
+2026-09-18 in `measurements/2026-09-18_isaacsim_sweep_240hz.json`. Wheel
+tracking against the analytic command, Isaac Sim, same instrument and sequence
+throughout:
+
+| command | 60 Hz | **240 Hz** | 480 Hz |
+|---|---|---|---|
+| `vx = 0.10` | 0.976 / 0.973 | **1.000 / 0.999** | 1.003 / 1.000 |
+| `vx = 0.15` | 0.985 / 0.982 | **1.000 / 0.999** | 0.999 / 0.998 |
+| `vx = 0.22` | 0.991 / 0.988 | **1.000 / 0.999** | 1.000 / 0.999 |
+| `wz = 0.2` | 0.483 / 0.475 | **0.999 / 0.869** | 0.987 / 0.878 |
+| `wz = 0.5` | 0.744 / 0.744 | **0.969 / 0.964** | 0.972 / 0.963 |
+| `wz = 1.0` | 0.875 / 0.875 | **1.007 / 1.007** | 1.011 / 1.012 |
+| `wz = 1.5` | 0.959 / 0.893 | **1.002 / 1.006** | 0.998 / 1.009 |
+
+**240 and 480 Hz are equivalent within run-to-run scatter**, so the cheaper rate
+is the default: RTF 0.90 against 0.68. Only the slowest pivot, `wz = 0.2`, still
+misses on one wheel.
+
+The residual has moved from the actuator into **slip**. The wheels now turn as
+commanded and the robot slides:
+
+| | wheels say | body did | slip |
+|---|---|---|---|
+| `wz = 0.5` pivot | 2.3485 rad | 2.1826 rad | **−7.1%** |
+| `wz = 0.2` pivot | 0.8750 rad | 0.7979 rad | **−8.8%** |
+| `vx = 0.15` straight | 0.7365 m | 0.7325 m | −0.5% |
+
+That is not a defect to remove. A burger pivoting on two wheels and a plastic
+skid does slide, and Gazebo cannot show it at all — its wheels carry
+`mu = 100000`. **The wheel collider is deliberately left as a cylinder** for the
+same reason: a sphere contacts at a point, and the expectation is that Isaac is
+the backend that resembles the real robot here.
+
+### Isaac Sim's lidar is rotated by half a beam
+
+Measured 2026-09-17 with `ros2 run tb3_bringup scan_test`, against ranges
+ray-cast from `worlds/small_office/world.yaml` — no reference scan, no
+hand-measured room.
+
+| | best-fit angular offset | residual rms |
+|---|---|---|
+| gazebo | **+0.000°** | 0.00242 m |
+| isaacsim | **+0.544°** | 0.00608 m, from 0.01509 |
+
+0.544° is 0.54 of one 1.0° beam. Half a bin points at a beam-indexing
+convention rather than a mounting error, but that is a hint and **not a
+diagnosis** — nothing has been changed. Small, systematic, and it biases every
+scan match slightly. Deferred deliberately; the test that would settle it is in
+`docs/roadmap.md` section 6.
 
 ### Materials, and a fidelity bug in Gazebo too
 

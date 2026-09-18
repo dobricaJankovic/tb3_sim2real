@@ -117,6 +117,15 @@ same oscillation rather than of a gain imbalance.
 ### Where the fix belongs
 
 Still `turtlebot3_isaacsim`, which owns the asset and the physics. The shipped
-change is the PhysX sub-step rate (60 → 480 Hz), which fixes translation to
-within 1% and takes rotation to 88% of command. The wheel collider is the
-remaining decision and is open.
+change is the PhysX sub-step rate, **60 → 240 Hz** (four sub-steps per rendered
+frame), which takes wheel tracking to within 1% on every linear command and
+96-100% on every angular one but the slowest. 240 and 480 Hz measure the same
+within run-to-run scatter, so the cheaper rate is the default.
+
+The wheel collider stays a **cylinder**, deliberately. Spheres remove the
+chatter but contact at a point, and a cylinder is the more faithful model of a
+tyre for a robot that pivots on two wheels and a skid.
+
+What is left is slip rather than actuation — the wheels turn as commanded and
+the robot slides, −7% in a pivot — which is a real phenomenon and one Gazebo
+cannot reproduce with `mu = 1e5` wheels. See `docs/status.md`.

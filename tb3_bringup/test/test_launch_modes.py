@@ -143,3 +143,36 @@ def test_physics_hz_reaches_isaacsim_only(backend, given, forwarded):
                 assert arguments.get('physics_hz') == forwarded
                 return
     pytest.fail('no backend include found')
+
+
+def test_backend_does_not_pin_its_own_physics_rate():
+    """physics_hz reaches turtlebot3_isaacsim only when the operator set it.
+
+    The rate belongs to that package. This file pinned its own 480 for a day
+    after the package had moved to 240, which is the whole reason the default
+    here is empty rather than a number.
+    """
+    import importlib.util
+    path = os.path.join(get_package_share_directory('tb3_bringup'),
+                        'launch', 'backends', 'isaacsim.launch.py')
+    spec = importlib.util.spec_from_file_location('isaacsim_backend', path)
+    backend = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(backend)
+
+    pkg = get_package_share_directory('turtlebot3_isaacsim')
+
+    def forwarded(**overrides):
+        context = LaunchContext()
+        for action in backend.generate_launch_description().entities:
+            if isinstance(action, DeclareLaunchArgument):
+                context.launch_configurations[action.name] = (
+                    perform_substitutions(context, action.default_value)
+                    if action.default_value else '')
+        context.launch_configurations.update(overrides)
+        include, = backend.include_simulator(context, pkg)
+        return dict(include.launch_arguments)
+
+    assert 'physics_hz' not in forwarded()
+    assert forwarded(physics_hz='240.0')['physics_hz'] == '240.0'
+    # The pass-through arguments must still all arrive.
+    assert set(backend.PASS_THROUGH) <= set(forwarded())

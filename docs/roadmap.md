@@ -328,6 +328,46 @@ starts *nothing*. It now raises instead of exiting silently. `ros2 launch`
 ignores unknown arguments, so a stale `robot:=remote` in someone's shell history
 is inert rather than an error.
 
+## 6. Isaac Sim's lidar is rotated by half a beam — measured, not diagnosed
+
+Found 2026-09-17 by `ros2 run tb3_bringup scan_test`, which parks the robot at
+the manifest spawn in `small_office` and compares every beam against a range
+**ray-cast from `world.yaml`** — the same file both simulators were generated
+from, so there is no reference scan and no hand-measured room.
+
+Fitting the angular offset that minimises the wall residual over every wall
+beam:
+
+| | best-fit offset | residual rms |
+|---|---|---|
+| gazebo | **+0.0000 rad (+0.000°)** | 0.00242 m |
+| isaacsim | **+0.0095 rad (+0.544°)** | 0.00608 m, down from 0.01509 |
+
+Gazebo is aligned exactly. Isaac is off by **0.544°, which is 0.54 of one 1.0°
+beam** — close enough to half a bin to suggest a beam-indexing convention
+(range reported at the edge of an azimuth sector rather than its centre) rather
+than a physical mounting error. Removing it cuts the residual by 2.5x and
+accounts for every leak.
+
+**Half a beam is a strong hint, not a diagnosis**, and nothing has been
+changed. It is small, systematic, and biases every scan match slightly — which
+is exactly the class of error the world registry exists to catch, and the
+angular twin of the silent lidar-offset risk already noted against
+`merge_fixed_joints`.
+
+### The test, when this is picked up
+
+1. Park at several headings and check whether the offset is constant **in the
+   sensor frame** (an indexing convention) or **varies with heading** (a
+   mounting or tf error). That one experiment splits the two causes.
+2. Then read `horizontalResolution` and the azimuth-to-index mapping in
+   `turtlebot3_isaacsim`'s RTX lidar profile
+   (`models/lidar_configs/turtlebot3_lds.json`) against what the OmniGraph
+   publishes.
+
+Deferred deliberately on 2026-09-18: it is a perception-layer bias of half a
+beam, and the actuation layer and the odometry contract come first.
+
 ## Next steps, in order
 
 1. **chrony on both machines.** Cheap, and it removes a whole class of ghost
@@ -349,6 +389,8 @@ is inert rather than an error.
    SLAM map into `worlds/<name>/map/<name>.yaml`.
 6. **The first real drive-to-goal**, which is still unrecorded — then the
    three-map comparison from section 3.
+7. **Isaac's half-beam lidar rotation** — section 6 above. One experiment
+   splits indexing convention from mounting error; deferred, not forgotten.
 
 ## Not urgent: making the robot's address stop being a variable
 

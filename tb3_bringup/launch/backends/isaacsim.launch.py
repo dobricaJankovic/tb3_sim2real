@@ -27,9 +27,39 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import (
+    DeclareLaunchArgument,
+    IncludeLaunchDescription,
+    OpaqueFunction,
+)
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
+
+#: Forwarded verbatim; each has a default in turtlebot3_isaacsim's own file.
+PASS_THROUGH = ('world', 'world_z', 'x_pose', 'y_pose', 'z_pose', 'yaw',
+                'headless')
+
+
+def include_simulator(context, pkg):
+    """Include turtlebot3_isaacsim, forwarding physics_hz only if it was set.
+
+    physics_hz is deliberately declared empty here rather than with a number.
+    The rate and the reasoning for it belong to turtlebot3_isaacsim, which owns
+    the asset and the physics; a default repeated here would be a second copy
+    free to drift from it -- and did, for a day, pinning 480 after the package
+    had moved to 240. Forwarding an empty string is not an option either: it
+    reaches the simulator as `--physics-hz ''` and argparse rejects it.
+    """
+    arguments = {k: LaunchConfiguration(k).perform(context)
+                 for k in PASS_THROUGH}
+    physics_hz = LaunchConfiguration('physics_hz').perform(context)
+    if physics_hz:
+        arguments['physics_hz'] = physics_hz
+    return [IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(pkg, 'launch', 'isaacsim.launch.py')),
+        launch_arguments=arguments.items(),
+    )]
 
 
 def generate_launch_description():
@@ -57,22 +87,12 @@ def generate_launch_description():
         DeclareLaunchArgument('yaw', default_value='0.0'),
         DeclareLaunchArgument('headless', default_value='false'),
         DeclareLaunchArgument(
-            'physics_hz', default_value='480.0',
-            description='PhysX sub-steps per simulated second. 480 because at '
-                        'the old 60 the wheels chatter instead of tracking '
-                        'their commanded velocity; see '
-                        'docs/worknotes/2026-09-17-lane-a-physics.md. Exposed '
-                        'here so that comparing two rates does not mean editing '
-                        'a default in an imported package and remembering to '
-                        'put it back.'),
+            'physics_hz', default_value='',
+            description='PhysX sub-steps per simulated second. Empty uses '
+                        "turtlebot3_isaacsim's own default, which is where the "
+                        'rate and the reasoning for it live. Set it to compare '
+                        'two rates without editing a default in an imported '
+                        'package and remembering to put it back.'),
 
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(
-                os.path.join(pkg, 'launch', 'isaacsim.launch.py')),
-            launch_arguments={
-                k: LaunchConfiguration(k) for k in (
-                    'world', 'world_z', 'x_pose', 'y_pose', 'z_pose', 'yaw',
-                    'headless', 'physics_hz')
-            }.items(),
-        ),
+        OpaqueFunction(function=include_simulator, kwargs={'pkg': pkg}),
     ])

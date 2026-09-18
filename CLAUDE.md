@@ -83,12 +83,25 @@ oscillating signal*: commanded a steady -1.2121 rad/s the wheel ranges over
 -2.91 to +1.04 and reverses direction. It is not a drive gain — the damping was
 swept 10,000x with no measurable effect — it is the contact solve, and the
 source is the cylindrical wheel collider, which no solver here rolls exactly.
-Running physics at 480 Hz (now the `turtlebot3_isaacsim` default) fixes
-translation to within 1% and takes rotation to 88% of command; spherical wheel
-colliders fix both, and that decision is open. Measured in
-`docs/worknotes/2026-09-17-lane-a-physics.md`. **Do not treat an Isaac angular
-result at low `wz` as ground truth**, and do not compare an Isaac measurement
-with one taken before 2026-09-17 without checking the physics rate it ran at.
+Running physics at **240 Hz** — four PhysX sub-steps per rendered frame, and
+the `turtlebot3_isaacsim` default since 2026-09-18 — takes wheel tracking to
+within 1% on every linear command and 96-100% on every angular one but the
+slowest. Measured in `docs/worknotes/2026-09-17-lane-a-physics.md` and
+`measurements/2026-09-18_isaacsim_sweep_240hz.json`; 240 and 480 Hz are
+equivalent within run-to-run scatter, so the cheaper rate is the default.
+
+**The wheel collider is deliberately NOT changed.** Spheres would remove the
+chatter entirely, but a sphere contacts at a point and a cylinder is the more
+faithful model of a tyre for a robot that pivots on two wheels and a skid — and
+the expectation is that Isaac, not Gazebo, is the one that resembles the real
+robot here.
+
+What remains is **slip, not actuation**: the wheels turn as commanded and the
+robot slides, −7% in a pivot at `wz = 0.5` against −0.5% driving straight. That
+is a real phenomenon, it is what a burger on two wheels and a skid actually
+does, and Gazebo cannot show it at all (`mu = 1e5`). **Do not compare an Isaac
+measurement with one taken before 2026-09-17 without checking the physics rate
+it ran at.**
 
 ## Where to look
 
