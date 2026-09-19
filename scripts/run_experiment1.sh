@@ -18,7 +18,10 @@
 # -p truth_xy_m / -p truth_yaw_deg. The README has the invocation.
 set -euo pipefail
 
-BACKEND=${1:?usage: run_experiment1.sh {gazebo|isaacsim}}
+# Quoted: an unquoted `}` inside ${var:?word} ends the expansion early, so
+# the message's own braces made this assign "$1}" for every argument and the
+# case below never matched. Committed that way and dead on arrival.
+BACKEND=${1:?"usage: run_experiment1.sh {gazebo|isaacsim}"}
 DATE=${2:-$(date +%Y-%m-%d)}
 OUT=/repo/measurements/experiment1
 WORLD=empty_stage
@@ -33,7 +36,10 @@ esac
 # way for UMBmark, which is its own prescription.
 MATRIX="sweep:3 line:3 spin_cw:3 spin_ccw:3 square_cw:5 square_ccw:5"
 
-source /ws/install/setup.bash
+# `set -u` off across this one line: colcon's generated setup.bash reads
+# COLCON_TRACE unguarded and aborts the script under -u before anything
+# has run. Strictness is worth keeping everywhere else.
+set +u; source /ws/install/setup.bash; set -u
 mkdir -p "$OUT"
 
 # A stray publisher on the domain would drive the robot in the other
