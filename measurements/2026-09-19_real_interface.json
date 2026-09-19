@@ -1,0 +1,80 @@
+{
+  "label": "real",
+  "date": "2026-09-19",
+  "what": "B2 four confirmations + B3 geometry, against the real TurtleBot3 burger",
+  "scans_sampled": 40,
+  "scan": {
+    "frame_id": "base_scan",
+    "range_min": 0.11999999731779099,
+    "range_max": 3.5,
+    "n_beams": 360,
+    "angle_min": 0.0,
+    "angle_max": 6.2657318115234375,
+    "angle_increment": 0.01745329238474369,
+    "scan_time": 0.20134228467941284,
+    "time_increment": 0.0005592841189354658,
+    "has_intensities": true,
+    "no_return_encoding": "0.0",
+    "beam_counts_over_all_scans": {
+      "finite": 6116,
+      "zero": 8284,
+      "inf": 0,
+      "nan": 0,
+      "negative": 0,
+      "over_range_max": 113
+    },
+    "over_range_max": {
+      "count": 113,
+      "fraction": 0.007847222222222222,
+      "min": 3.51200008392334,
+      "max": 4.190999984741211
+    },
+    "zero_beams": {
+      "always": 169,
+      "sometimes": 84,
+      "never": 107
+    },
+    "rate_hz_robot_clock": 4.985892403531563,
+    "rate_hz_wall_receive": 5.060924829152101,
+    "rate_jitter_std_s": 0.00043142602914434644
+  },
+  "odom": {
+    "frame_id": "odom",
+    "child_frame_id": "base_footprint",
+    "rate_hz_robot_clock": 19.98784327788308,
+    "rate_jitter_std_s": 0.0053537726030038965
+  },
+  "tf_base_footprint_to_base_scan": {
+    "translation": [
+      -0.032,
+      0.0,
+      0.182
+    ],
+    "rotation_xyzw": [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ],
+    "expected": [
+      -0.032,
+      0.0,
+      0.182
+    ],
+    "matches": true
+  },
+  "driver": "hls_lfcd_lds_driver/hlds_laser_publisher (LDS-01)",
+  "urdf": {
+    "robot": "~/turtlebot3_ws/src/turtlebot3 @ 90a68bd (branch humble), turtlebot3_description 2.3.7",
+    "container": "ros-humble-turtlebot3-description 2.3.6-1jammy.20260718.021508",
+    "turtlebot3_burger_urdf_md5": "51b1f9517b2666efefee18310009703d",
+    "identical": true
+  },
+  "clock": {
+    "chrony_on_robot": false,
+    "robot_timesync": "systemd-timesyncd -> 10.118.16.1",
+    "offset_ws_minus_robot_s": -0.028,
+    "offset_method": "ssh date +%s.%N over a multiplexed connection, rtt ~0.046 s",
+    "note": "B1 not yet done; these interface numbers do not depend on it"
+  }
+}

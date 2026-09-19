@@ -2,7 +2,7 @@
 
 What is verified, and what is not. Start here before claiming something works.
 
-## Verified 2026-09-15 to 2026-09-18
+## Verified 2026-09-15 to 2026-09-19
 
 **Each subsection below carries its own date, and they are not all the same
 day.** This heading said "2026-09-15" until 2026-09-18 while findings from the
@@ -233,6 +233,59 @@ are per-plugin. `scan_test` now reports `scan_rate_hz` and `wall_rate_hz` side
 by side in every run, so this confound cannot come back — and on hardware the
 same field is the real robot's own clock, which pairs with B2.
 
+### The real robot's interface, measured for the first time — 2026-09-19
+
+The robot was on, its stock `robot.launch.py` running on the Pi, and everything
+below was read from the container — which also re-verified the unicast-DDS path
+in `docs/network.md`: 13 topics from the robot, on `ROS_DOMAIN_ID=30`, across
+two subnets with no multicast. `measurements/2026-09-19_real_interface.json`,
+40 scans. `docs/experiment-plan.md` B2 and B3.
+
+| | expected | measured |
+|---|---|---|
+| lidar | LDS-01, `range_max 3.5` | **3.5**, `hls_lfcd_lds_driver` |
+| `/scan` rate | ~5 Hz | **4.986 Hz**, jitter std **0.43 ms** |
+| `/odom` rate | ~20 Hz | **19.988 Hz**, jitter std 5.4 ms |
+| `/imu`, `/joint_states` | — | 19.996 Hz, ~20 Hz |
+| `base_footprint → base_scan` | `(-0.032, 0, 0.182)` | **exactly that**, identity rotation |
+
+`docs/architecture.md` said the real `/scan` came from `ld08_driver`, which is
+the LDS-02 driver. **It was wrong**, and is corrected. `ld08_driver` is checked
+out in the robot's own `turtlebot3_ws` but is not in the running graph.
+
+**The one-URDF claim is now measured rather than assumed, and it survives a
+surprise.** The robot builds `turtlebot3_description` **2.3.7** from source; the
+container has apt's **2.3.6**. The versions differ — and the file does not:
+`turtlebot3_burger.urdf` is byte-identical, md5
+`51b1f9517b2666efefee18310009703d`. Comparing versions, which is what the plan
+asked for, would have raised a false alarm; comparing the file is the check that
+means something.
+
+**Three things the real lidar does that neither simulator does:**
+
+1. **No-return is `0.0`** — a third encoding, against Isaac's `-1.0` and
+   Gazebo's `inf`. Harmless to Nav2 (`0.0 < range_min`, so AMCL maps it to max
+   range), and it makes "saw nothing" and "dropped the beam" the same value:
+   over 40 stationary scans, 169 of 360 beams were `0.0` throughout and **84
+   flickered**.
+2. **0.8% of returns exceed its own `range_max`** — 113 of 14400 beams, out to
+   **4.191 m** against an advertised 3.5. Both simulators cut cleanly at 3.5.
+3. **`angle_min = 0.0`, `angle_increment = 0.0174533` (exactly 1°).** It starts
+   at the front like Gazebo and steps by exactly a degree like Isaac; Gazebo's
+   increment is 0.23% wide (upstream writes `<max_angle>6.28</max_angle>`). So
+   **neither simulator matches the robot's scan convention exactly**, and each
+   differs in a different field.
+
+None of the three is being fixed — reasons and the consequence for any analysis
+script are in `docs/experiment-plan.md`, "Deliberately not being fixed".
+
+**Clock sync (B1) is still not done and is unaffected by any of this.** The Pi
+has no chrony, no RTC, and syncs to `10.118.16.1` while the workstation syncs to
+Cloudflare. Workstation − robot measured **−28 ms ± 23 ms**. Nothing above
+depends on it: the rates are per-publisher deltas and the geometry is static.
+The first thing that *will* depend on it is any tf lookup across the two
+machines, which is every Nav2 run.
+
 ### Materials, and a fidelity bug in Gazebo too — 2026-09-15
 
 Isaac Sim rendered every stage grey because the manifest's only statement about
@@ -392,12 +445,14 @@ else** — `docker compose restart tb3_ros` is the reliable reset, and costs a
 
 ## Known open
 
-- **`/scan` encodes no-return differently.** Isaac reports `-1.0` where Gazebo
-  reports `inf`, and `-1.0` is not a valid `LaserScan` range — so the two
-  backends disagree on the one field Nav2's obstacle layer filters on. It has
-  not bitten a Nav2 run yet, because the obstacle layer discards out-of-range
-  values either way, but it is a difference Nav2 is entitled to trip over.
-  It belongs in `turtlebot3_isaacsim`, which owns the lidar profile.
+- **`/scan` encodes no-return three different ways**, one per backend: Isaac
+  `-1.0`, Gazebo `inf`, and — measured 2026-09-19 — the real LDS-01 **`0.0`**.
+  `-1.0` is not a valid `LaserScan` range, so the backends disagree on the one
+  field Nav2's obstacle layer filters on. It has not bitten a Nav2 run, because
+  every consumer discards out-of-range values either way. Left alone
+  deliberately now that all three are known (`docs/experiment-plan.md`); if
+  Isaac's is ever changed it belongs in `turtlebot3_isaacsim`, which owns the
+  lidar profile.
 
   The *geometry* half of this is fixed and this note used to be wrong about it:
   Isaac published 3600 rays against Gazebo's 360 while this repository carried
@@ -410,9 +465,13 @@ else** — `docker compose restart tb3_ros` is the reliable reset, and costs a
 - **The real backend's URDF is the robot's, not this repository's.** Under
   `backend:=real` the robot's own `turtlebot3_description` publishes
   `/robot_description` and `/tf_static`, so the "one URDF above
-  `base_footprint`" property holds between `gazebo` and `isaacsim` but not
-  across to `real`. Deliberate, 2026-09-16; the alternative was to stop the
-  robot publishing it and push this repository's URDF from the workstation.
+  `base_footprint`" property holds between `gazebo` and `isaacsim` by
+  construction and across to `real` only by coincidence. Deliberate,
+  2026-09-16; the alternative was to stop the robot publishing it and push this
+  repository's URDF from the workstation. **Measured 2026-09-19: the
+  coincidence holds — the two files are byte-identical** (above). It is still
+  two copies, so it can still diverge the day either side is updated; the md5
+  is the check, not the version number.
 - **Nav2 comes up on both simulated backends; a goal has not been driven since
   the restructure.** Localisation is verified (`map->odom` at the spawn pose on
   both) and every lifecycle node is active, but the last recorded drive-to-goal

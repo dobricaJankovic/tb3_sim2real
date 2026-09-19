@@ -196,7 +196,7 @@ All three backends must present an identical surface to Nav2.
 
 | | real | gazebo | isaacsim |
 |---|---|---|---|
-| `/scan` | ld08_driver | gazebo lidar plugin | `ROS2PublishLaserScan` |
+| `/scan` | `hls_lfcd_lds_driver` (LDS-01) | gazebo lidar plugin | `ROS2PublishLaserScan` |
 | `/odom` | turtlebot3_node | diff_drive plugin | `wheel_odometry` node |
 | tf `odom→base_footprint` | turtlebot3_node | diff_drive plugin | `wheel_odometry` node |
 | `/ground_truth/odom` | **nothing — there is none** | P3D plugin | `IsaacComputeOdometry` |
@@ -212,6 +212,25 @@ That last row is the design's load-bearing decision. The URDF is the single
 source of truth for the kinematic tree, so each backend supplies only a *raw*
 `odom→base_footprint` transform and the two sims cannot drift from the real
 robot's geometry.
+
+**Measured against the hardware, 2026-09-19** (`docs/experiment-plan.md` B2, B3;
+`measurements/2026-09-19_real_interface.json`). Two rows of that table were
+claims until then:
+
+- The `/scan` row said `ld08_driver`, which is the LDS-02 driver. It is wrong,
+  and is corrected above. The running node is
+  `hls_lfcd_lds_driver/hlds_laser_publisher` and `/scan` reports
+  `range_max: 3.5` — an **LDS-01**, which is what `.env` says and what both
+  simulators model. `ld08_driver` *is* checked out in the robot's own
+  `turtlebot3_ws`, unbuilt into the running graph, which is presumably where
+  the claim came from.
+- The last row rests on the robot and the container independently having the
+  same `turtlebot3_description`. They do, and by more than version number:
+  `turtlebot3_burger.urdf` is **byte-identical**, md5
+  `51b1f9517b2666efefee18310009703d`, between the robot's source checkout
+  (2.3.7, built in `~/turtlebot3_ws`) and the container's apt package (2.3.6).
+  `base_footprint → base_scan` measures `(-0.032, 0, 0.182)` on the robot,
+  exactly the figure Isaac Sim's asset uses.
 
 ### `/odom` means the same thing on all three, and that took work
 

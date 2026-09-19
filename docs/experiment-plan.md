@@ -27,7 +27,10 @@ below records what it found, and two of them found the plan wrong:
 rather than Isaac Sim (A2).
 
 **The next thing to do is B1, and it needs the robot in the room.** Everything
-from here on does.
+from here on does. *Session of 2026-09-19: the robot was on, and **B2 and B3 are
+done** — they need no root and do not depend on B1. B1 itself is still open: both
+halves that remain need a sudo password, one on the Pi and one on the
+workstation.*
 
 ## A0. The `.repos` pin — **fixed 2026-09-18, listed so it is not undone**
 
@@ -210,6 +213,16 @@ and a step mid-run invalidates tf caches on both machines.
 handed over, tracking an upstream at 52 µs, serving on UDP 123 with
 `allow 10.118.16.0/22`. What remains is the Pi and the proof.
 
+**State on 2026-09-19, robot up 22 minutes, re-measured:** the Pi still has **no
+chrony** — `systemd-timesyncd` `active`, still pointed at `10.118.16.1`, still no
+`/dev/rtc*`. Offset workstation − robot is **−28 ms** (ws *behind*), from five
+`date +%s.%N` pairs over one multiplexed SSH connection, rtt ~46 ms so the
+uncertainty is ±23 ms. That is not the +157 ms of 2026-09-16 and it is not
+progress: the workstation moved to chrony/Cloudflare on 2026-09-18, so the pair
+is simply floating somewhere else. **Two independent clocks, neither aware of
+the other, offset of the same order as the measurement uncertainty** — which is
+exactly the state B1 exists to end.
+
 Full config and the reasoning for chrony over timesyncd: **`docs/roadmap.md`
 §2.** The Pi half needs a sudo password there, so it is a by-hand step:
 
@@ -240,29 +253,57 @@ self-reports and the third trusts neither:
 Check it **right after the Pi boots**, because that is when experiments start,
 and never let a correction land during a run.
 
-## B2. Four confirmations, one command each
+## B2. Four confirmations — **done 2026-09-19, all four**
 
-| what | command | expected |
+Measured against the real robot with its stock `robot.launch.py` running on the
+Pi and the reads taken from the container, which also exercises the unicast-DDS
+path of `docs/network.md`. Raw record:
+`measurements/2026-09-19_real_interface.json`, 40 scans.
+
+| what | expected | **measured** |
 |---|---|---|
-| **lidar model** | `ros2 topic echo /scan --field range_max --once` | **3.5** = LDS-01, matching both sims. 8.0 = LDS-02, whose range both simulators would then truncate silently. `.env` says LDS-01, `docs/architecture.md:199` says `ld08_driver` (LDS-02) — **one is wrong; fix the doc after measuring.** |
-| **no-return encoding** | `ros2 topic echo /scan --field ranges --once` | Isaac `-1.0`, Gazebo `inf`. Record what the real driver does. **No change planned** — see below. |
-| **scan rate** | `ros2 topic hz /scan` | ~5 Hz. Pairs with A4. |
-| **odom rate** | `ros2 topic hz /odom` | ~20 Hz. |
+| **lidar model** | 3.5 = LDS-01 | **3.5**, from `hls_lfcd_lds_driver/hlds_laser_publisher`. `.env` was right and `docs/architecture.md` was wrong; the doc is fixed. |
+| **no-return encoding** | Isaac `-1.0`, Gazebo `inf` | **`0.0`** — a *third* encoding, and neither simulator's. See below. |
+| **scan rate** | ~5 Hz | **4.986 Hz** on the robot's own clock, jitter std **0.43 ms** |
+| **odom rate** | ~20 Hz | **19.988 Hz**, jitter std 5.4 ms |
 
-## B3. The robot's geometry
+Three more facts the same read produced, none of which needed another run:
 
-The "one URDF for all three" claim rests on the robot and the container
-independently having the same stock `turtlebot3_description`. Nothing checks
-it, and a skew moves frame origins with no error.
+- **The real scan's angular convention is `angle_min = 0.0`,
+  `angle_increment = 0.0174533` (exactly 1°), `angle_max = 6.26573` (359°).**
+  So it starts at the front like Gazebo and steps by exactly one degree like
+  Isaac Sim — Gazebo's increment is the 0.23%-wide 0.017493 from upstream's
+  `6.28`. Both simulators still differ from the robot in one respect each, and
+  the "not being fixed" decision below is unchanged: every consumer
+  reconstructs the angle arithmetically.
+- **0.8% of returns exceed `range_max`** — 113 beams of 14400, from 3.512 m out
+  to **4.191 m**, with `range_max` advertised as 3.5. The driver does not clamp
+  its own declared maximum. **Neither simulator can produce this**: both cut
+  cleanly at 3.5. Nav2 is safe (the costmap obstacle layer range-filters and
+  AMCL clamps to `range_max`), so this needs no fix — but an analysis script
+  written against the bags must not assume `r <= range_max`.
+- **Of 360 beams, 169 read 0.0 in every one of the 40 scans, 84 flicker, 107
+  never do.** The flickering ones are the dropout the encoding below is
+  actually about; the always-zero ones are just an open room past 3.5 m.
 
-```bash
-dpkg -l ros-humble-turtlebot3-description | tail -1     # on the Pi and in the container
-ros2 run tf2_ros tf2_echo base_footprint base_scan      # want (-0.032, 0, 0.182)
-```
+## B3. The robot's geometry — **done 2026-09-19, passed, and stronger than asked**
 
-Stock hardware, so this should pass. If anything looks off, measure the lidar
-height with a tape against 0.182 m — the composition of `base_joint` (0.010)
-and `scan_joint` (0.172), which Isaac Sim's asset uses exactly.
+The check asked for matching `turtlebot3_description` versions. The versions do
+**not** match — and it does not matter, because the file does:
+
+| | source | version |
+|---|---|---|
+| robot | `~/turtlebot3_ws/src/turtlebot3` @ `90a68bd`, branch `humble`, built from source | 2.3.7 |
+| container | `ros-humble-turtlebot3-description` apt | 2.3.6-1jammy.20260718.021508 |
+
+`turtlebot3_burger.urdf` is **byte-identical across the two**, md5
+`51b1f9517b2666efefee18310009703d`. That is the claim the interface contract
+actually rests on, and it is now checked rather than assumed — a version
+comparison alone would have raised a false alarm here.
+
+`base_footprint → base_scan` on the robot: **`(-0.032, 0, 0.182)`**, identity
+rotation — the wanted figure exactly, so no tape measure was needed and Isaac
+Sim's asset agrees with the hardware.
 
 ## B4. Experiment 1 — open space, open loop
 
@@ -470,7 +511,7 @@ Decided 2026-09-18. Recorded so they are not reopened.
 |---|---|---|
 | gazebo | 0.0 | 0.017493 (= 6.28 / 359) |
 | isaacsim | −3.14159 | 0.0174533 (= exactly 1°) |
-| real LDS-01 | expected 0.0 | expected 0.0174533 |
+| real LDS-01 | **0.0** (measured 2026-09-19) | **0.0174533** (measured) |
 
 Isaac starts its sweep at the rear where Gazebo starts at the front, and
 Gazebo's angular scale is 0.23% wide because upstream's `model.sdf` writes
@@ -486,11 +527,33 @@ small; and it is not a question the work is about.
 reconstruct the angle and must **never** index `ranges[i]` to mean a direction.
 `ranges[0:30]` is "in front" on Gazebo and "behind" on Isaac.
 
-### `/scan` encodes no-return three ways — **confirm only, no change**
+### `/scan` encodes no-return three ways — **all three now measured, no change**
 
-Isaac `-1.0`, Gazebo `inf`, the real driver recorded in B2. Nav2 survives all
-three: AMCL maps `<= range_min` to max range, the costmap obstacle layer
-range-filters.
+| | no return | measured |
+|---|---|---|
+| isaacsim | `-1.0` | |
+| gazebo | `inf` | |
+| real LDS-01 | **`0.0`** | 2026-09-19, B2 |
+
+Literally three ways, one per backend, with no two agreeing. Nav2 survives all
+of them: AMCL maps `<= range_min` to max range and `0.0 < 0.12`, the costmap
+obstacle layer range-filters. **No change** — but an analysis script must handle
+all three, and on the real robot a `0.0` carries no information about whether
+the beam saw nothing or the driver dropped it. 84 of 360 beams flickered between
+`0.0` and a finite range over 40 stationary scans; 169 were `0.0` throughout.
+
+### The real driver returns ranges beyond its own `range_max` — **no action**
+
+Measured 2026-09-19: 113 of 14400 beams (**0.8%**) came back between 3.512 m and
+**4.191 m** while `/scan` advertised `range_max: 3.5`. Neither simulator does
+this; both cut cleanly at 3.5.
+
+Nav2 is unaffected — AMCL clamps to `range_max` and the costmap range-filters
+before the obstacle layer sees a reading — so nothing is being changed. The
+consequence, same shape as the angle one above: **an analysis script written
+against the bags must not assume `r <= range_max`.** A histogram binned to
+`range_max` silently drops these, and a naive "fraction of beams that returned"
+disagrees with one that filters.
 
 ### Gazebo's lidar sits 1 mm low — **closed**
 
