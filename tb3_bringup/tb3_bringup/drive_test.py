@@ -216,8 +216,12 @@ class DriveTest(Node):
         # Hand-measured ground truth, for backend:=real where the topic does
         # not exist. [forward_m, lateral_m] in the START frame and the net
         # heading in degrees -- the marks on the experiment-1 run sheet.
+        # NaN rather than an uninitialized DOUBLE: a parameter declared with a
+        # type and no default raises ParameterUninitializedException on read,
+        # so every simulated run -- which passes none of these -- would abort
+        # before it drove anywhere.
         self.declare_parameter('truth_xy_m', [])
-        self.declare_parameter('truth_yaw_deg', Parameter.Type.DOUBLE)
+        self.declare_parameter('truth_yaw_deg', float('nan'))
         self.declare_parameter('truth_method', '')
         self.declare_parameter('bag_dir', '')
         self.label = self.get_parameter('label').value
@@ -469,6 +473,7 @@ class DriveTest(Node):
         """
         xy = list(self.get_parameter('truth_xy_m').value or [])
         yaw = self.get_parameter('truth_yaw_deg').value
+        yaw = None if yaw is None or math.isnan(yaw) else float(yaw)
         method = self.get_parameter('truth_method').value
         if not xy and yaw is None:
             return None
