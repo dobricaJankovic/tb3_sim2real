@@ -2230,3 +2230,63 @@ marking the workstation `*` rather than `?`.
 room.** Next is B1: chrony on the Pi, then the check that trusts neither
 daemon's self-report — `date +%s.%N` on both machines, right after the Pi boots,
 against the 157 ms measured on 2026-09-16.
+
+## 2026-09-19 (later) — Experiment 1's real leg, deliberately left half-run
+
+`sweep` ×3 and `line` ×3 recorded for `backend:=real`, in the new
+`measurements/experiment1/real/` (kept apart from the Gazebo files already in
+that directory, which is otherwise crowded enough to lose things in). Then a
+decision: `spin_cw`, `spin_ccw`, `square_cw` and `square_ccw` are **not** being
+run — the experimenter chose to move straight to experiment 2 (building the lab
+room, B6 onward) instead of finishing the 22-run matrix on hardware. Recorded
+so it reads as a choice later, not an oversight. Full account, including
+everything below: `measurements/experiment1/notes.md`.
+
+Four things went wrong on the way, each instructive:
+
+**Files first landed outside the repository entirely.** The earliest runs were
+launched from `/ws` inside the container without `cd /repo`, and `/ws` is not a
+bind mount — only `./tb3_bringup`, the two `src/` deps, `.` (at `/repo`), and
+`worlds/` are, per `docker-compose.yml`. The files existed only in the
+container's writable layer until moved by hand into `/repo/measurements/`, and
+came out `root:root` because `give_back()` chowns to whoever owns the directory
+a file lands in *at write time* — which was a root-owned `/ws` path, not the
+bind mount. Fixed with an explicit `chown`; every run after `line_r2` wrote
+directly into the bind mount and needed no fixing.
+
+**The burger cannot hold 0.22 m/s in `sweep` on this floor.** That phase — the
+same rate already recorded for `gazebo`/`isaacsim` — produced a stalled right
+wheel (`wheel L 0.201/6.667 R 0.000/6.667`) and a spin instead of a straight
+line. Confirmed by hand, not just by the log. `SEQUENCES['sweep']` in
+`drive_test.py` was changed from `lin_0.22` to `lin_0.20`, which is a change to
+the one instrument shared by all three backends: a `real` `sweep` from now on
+is not commanded identically to the `gazebo`/`isaacsim` files already on disk
+at the old top rate, at that one phase.
+
+**A likely units mismatch in real `/joint_states`, found and flagged, not
+fixed.** Every `wheel_track_l`/`wheel_track_r` on `real` reads ≈
+`WHEEL_RADIUS` (0.033) regardless of the commanded rate — e.g. `wheel_wl =
+0.14893` against `cmd_wl = 4.54545 rad/s` for a commanded 0.15 m/s straight.
+Read as rad/s (what the simulators publish and what `drive_test` assumes) that
+is a 97% tracking failure; read as **m/s**, `wheel_wl` is within 1% of the
+commanded linear speed, which is the far more plausible reading. If right,
+every `wheel_track_*`/`wheel_err_*` number recorded for `real` today is against
+the wrong assumed units. `net`/`hand`, which score position and heading rather
+than wheel rate, are unaffected. Needs checking against the real driver's
+source, not assumed, before `drive_test.py` changes — this repo's own
+search-before-building rule, applied to itself.
+
+**A stall mid-`line`, most likely the battery.** The first attempt at
+`line_r3` stopped after ~1.0 m of a commanded ~3.0 m, with `/joint_states`
+reporting non-physical values (`wheel L 535/608`) including at rest. No
+obstruction. Deleted rather than patched or kept; re-run after charging, at
+`/battery_state` = 12.04 V / 85.6%, completed cleanly. No voltage reading
+exists from *before* the stall, because the session's own first check — read
+the battery before driving — was skipped at the start and only done after
+something had already gone wrong. Read it first, every session, from now on.
+
+`line`'s three hand-measured repeats all drift the same direction (left of the
+commanded heading) over a commanded 3.0 m straight, but not by a consistent
+amount: −0.72 m, −0.68 m, −0.38 m. A systematic sign with an inconsistent
+magnitude, reported without interpretation — floor material for this session
+was also not recorded, which is now an open gap to close before experiment 2.

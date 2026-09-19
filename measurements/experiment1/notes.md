@@ -139,3 +139,105 @@ matrix re-run from the start. The stray-process guard only looked for
 16 GB, 2%, with free inodes. 412 segments are present and some date from
 2026-09-17, so they are stale — but there is no pressure and killing Isaac
 restored participant creation with all of them still in place.
+
+---
+
+## Real backend, 2026-09-19
+
+**Decided: the real leg of experiment 1 stops here, deliberately incomplete.**
+`sweep` ×3 and `line` ×3 are recorded, in `real/`. **`spin_cw`, `spin_ccw`,
+`square_cw` and `square_ccw` were not run and are not planned** — the
+experimenter chose to move on to experiment 2 (`docs/experiment-plan.md` B6
+onward, Nav2 in the lab room) rather than complete the matrix. Not a blocker,
+not forgotten: a decision. If the full 22-run matrix is ever wanted for `real`,
+this is the gap.
+
+World: `empty_stage`, no Nav2, no SLAM, `backend:=real` — which starts no local
+process (`bringup.launch.py` contributes nothing for `real`; the Pi's own
+`robot.launch.py` supplies `/odom`, `/joint_states`, `/cmd_vel`). Driven by
+hand, one repeat at a time, with a person moving the robot back to a floor mark
+between repeats — `run_experiment1.sh` explicitly refuses `real` for this
+reason.
+
+**Files landed in the wrong place at first, and were moved.** The very first
+runs (`square_cw_r1`, `sweep_r1..r3`) were launched from `/ws` inside the
+container without `cd /repo` first, and `/ws` is **not** a bind mount —
+`docker-compose.yml` only mounts `./tb3_bringup`, the two `src/` deps, `.` at
+`/repo`, and `worlds/`. Those files existed only in the container's writable
+layer, invisible on the host, until they were `mv`'d into `/repo/measurements/`
+by hand. `give_back()` also chowns to whoever owns the directory a file lands
+in *at write time* — since it first wrote into a root-owned `/ws` tree, the
+chown was a no-op, and the files arrived in the bind mount still `root:root`;
+fixed with an explicit `chown` from inside the container after the move. Every
+run from `line_r2` onward wrote directly into `measurements/experiment1/real/`
+in the container and came out owned correctly. **All real-backend files now
+live in `measurements/experiment1/real/` and `measurements/bags/real/`**, kept
+separate from the Gazebo files in the parent directory for the same reason —
+this directory has a lot of files in it and the two are easy to conflate.
+
+**`sweep`'s top linear phase was changed from 0.22 m/s to 0.20 m/s, in the
+shared instrument.** The first attempt at `sweep` (before this decision) at the
+original 0.22 m/s — the burger's rated max, the same value already recorded
+for `gazebo`/`isaacsim` — produced `lin_0.22   wheel L 0.201/6.667 R 0.000/6.667`:
+the right wheel reported zero velocity while commanded, and the robot spun
+~344° instead of driving ~1.1 m straight. The experimenter tested by hand
+afterward and confirmed the real robot has a problem at that commanded speed.
+`SEQUENCES['sweep']` in `tb3_bringup/tb3_bringup/drive_test.py` was edited to
+`lin_0.20` (0.20 m/s) to avoid it — **this is a change to the one instrument
+shared by all three backends**, so a `real` `sweep` run from now on is not
+commanded identically to the `gazebo`/`isaacsim` `sweep` files already on disk
+at the old 0.22 m/s top rate; note this when comparing that one phase across
+backends. `sweep_r1..r3` at the new cap all tracked cleanly, no repeat of the
+stall.
+
+**Repeat 2 of `sweep` was contaminated by hand-lifting the robot mid-run**
+(a large `dyaw` jump across `stop_r4`→`lin_0.10` while wheels read
+zero/matching-commanded — first suspected as an `/odom` glitch, then confirmed
+by the experimenter as the robot having been picked up). Re-run clean; the
+contaminated file was overwritten, not kept.
+
+**A likely units mismatch in `/joint_states` velocity on hardware, found but
+not fixed.** Every real run's `wheel_track_l`/`wheel_track_r` reads ≈
+`WHEEL_RADIUS` (0.033) regardless of commanded rate — e.g. `line_r1`:
+`wheel_wl=0.14893` against `cmd_wl=4.54545` (a commanded 0.15 m/s straight),
+ratio 0.0328. Read as **rad/s** (what `cmd_wl`/`cmd_wr` are, and what both
+simulators publish) that looks like a 97% tracking failure; read as **m/s**
+(what `wheel_wl` numerically equals almost exactly — 0.149 vs. commanded
+0.15 m/s) it is a normal ~1% error. The second reading is almost certainly
+right, which means **the real robot's `/joint_states` velocity field is
+probably in m/s, not rad/s**, and every `wheel_track_*`/`wheel_err_*` number in
+every real-backend file recorded today is computed against the wrong assumed
+units and should not be read at face value. `net`/`hand` (position/heading, not
+wheel rate) are unaffected. Not fixed this session — needs checking against the
+real driver's source before `drive_test.py` is changed, per this repo's
+search-before-building rule.
+
+**`line_r3`'s first attempt stalled mid-run with garbage readings, most likely
+the battery.** Robot stopped after ~1.0 m of a commanded ~3.0 m straight
+(no obstruction), and `/joint_states` read `wheel L 535/608` and similar —
+non-physical values, including during the following `settle_post` while
+commanded to be stopped. Deleted rather than kept or patched. Re-run after
+charging, at `/battery_state` = **12.04 V, 85.6%**, and it completed cleanly.
+No voltage reading exists from the stalled attempt to compare against, which
+is exactly the gap the README's "record battery voltage" condition exists to
+close — start-of-session voltage was not read before driving began today, only
+after the stall. Read it first, every session, from now on.
+
+### `line` results, ×3, hand-measured
+
+| repeat | forward_m | lateral_m | distance_m |
+|---|---|---|---|
+| r1 | 2.86 | −0.72 | 2.949 |
+| r2 | 2.82 | −0.68 | 2.901 |
+| r3 | 2.91 | −0.38 | 2.935 |
+
+All three drift to the **same side** (left of the commanded heading) over a
+commanded 3.0 m straight, but the size of the drift is not consistent
+(−0.72, −0.68, −0.38) — a systematic direction with an inconsistent
+magnitude, reported without interpretation.
+
+**Floor:** not recorded this session — outstanding, add before experiment 2.
+**Reference point on the robot:** not written down explicitly by name this
+session, only used consistently by the same person — should be stated
+precisely (e.g. "point on the floor under the wheel axle midpoint") before any
+further hand-measured run, real or otherwise.

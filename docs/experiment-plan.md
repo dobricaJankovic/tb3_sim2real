@@ -26,10 +26,16 @@ below records what it found, and two of them found the plan wrong:
 `RewrittenYaml` cannot create absent keys (B5), and `/imu` comes from Gazebo
 rather than Isaac Sim (A2).
 
-**Section B is open from B4 onward.** *Session of 2026-09-19, robot on:
-**B1, B2 and B3 are all done.** The next thing to do is **B4**, the open-loop
-drive sweep, and it needs clear floor and a tape measure rather than another
-password.*
+**Section B is open from B6 onward.** *Session of 2026-09-19, robot on:
+**B1, B2 and B3 are all done. B4's real leg is deliberately partial and closed:
+`sweep` ×3 and `line` ×3 are recorded, `spin_cw`/`spin_ccw`/`square_cw`/
+`square_ccw` were decided against in favour of moving to experiment 2** — see
+`measurements/experiment1/notes.md`, "Real backend, 2026-09-19", for what ran,
+what didn't, and why (including a units-mismatch finding in real
+`/joint_states` velocity that's flagged but not fixed, and a `sweep` sequence
+edit — 0.22→0.20 m/s top linear rate — that makes that one phase
+non-comparable with the already-recorded `gazebo`/`isaacsim` files). The next
+thing to do is **B6**, building the lab room and putting it in the registry.*
 
 ## A0. The `.repos` pin — **fixed 2026-09-18, listed so it is not undone**
 
@@ -357,7 +363,12 @@ comparison alone would have raised a false alarm here.
 rotation — the wanted figure exactly, so no tape measure was needed and Isaac
 Sim's asset agrees with the hardware.
 
-## B4. Experiment 1 — open space, open loop
+## B4. Experiment 1 — open space, open loop — **real leg deliberately partial, closed 2026-09-19**
+
+`sweep` ×3 and `line` ×3 done for `real`; `spin_cw`/`spin_ccw`/`square_cw`/
+`square_ccw` decided against, not forgotten — the experimenter chose to move on
+to experiment 2 rather than complete the matrix. Full account:
+`measurements/experiment1/notes.md`.
 
 ```bash
 ros2 launch tb3_bringup bringup.launch.py backend:={gazebo|isaacsim|real} world:=empty_stage
