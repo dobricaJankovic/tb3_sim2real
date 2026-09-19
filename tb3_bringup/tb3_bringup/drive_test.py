@@ -50,6 +50,24 @@ from sensor_msgs.msg import JointState
 from tb3_bringup.recording import (DRIVE_TOPICS, give_back, start_bag,
                                    stop_bag)
 
+def _square(wz, side_s=13.333, turn_s=3.1416):
+    """UMBmark: four sides and four 90-degree corners, ending where it began.
+
+    `wz` sets the direction -- negative is clockwise. The turn duration is
+    pi/2 divided by |wz|, so a different rate would need a different duration;
+    both are stated here rather than derived so the numbers in the JSON match
+    the numbers in the run sheet.
+    """
+    phases = [('settle_pre', 0.00, 0.00, 2.0)]
+    for i in range(4):
+        phases.append(('side_{}'.format(i + 1), 0.15, 0.00, side_s))
+        phases.append(('stop_s{}'.format(i + 1), 0.00, 0.00, 1.0))
+        phases.append(('turn_{}'.format(i + 1), 0.00, wz, turn_s))
+        phases.append(('stop_t{}'.format(i + 1), 0.00, 0.00, 1.0))
+    phases.append(('settle_post', 0.00, 0.00, 3.0))
+    return phases
+
+
 # name, linear.x (m/s), angular.z (rad/s), seconds.
 #
 # Kept inside the burger's real limits (0.22 m/s, 2.84 rad/s) and well inside
@@ -87,6 +105,64 @@ SEQUENCES = {
         ('lin_0.22', 0.22, 0.00, 5.0),
         ('settle_post', 0.00, 0.00, 2.0),
     ],
+    # --- experiment 1, the four paths -------------------------------------
+    #
+    # These three exist because `sweep` ends at a pose nothing can measure. It
+    # rotates about 16 rad and then drives three different distances, so its
+    # endpoint is a compound of everything and a tape measure against it says
+    # nothing. Fine on a simulator, where /ground_truth/odom is continuous;
+    # useless on hardware, where the only ground truth is a person with a tape.
+    #
+    # So each of these ends at a pose that ONE measurement describes, and the
+    # instrument reports that same scalar from ground truth on the simulated
+    # backends -- same definition, same start frame, different source. That is
+    # what makes the three backends comparable at all on this layer.
+    #
+    # `line` -- pure translation, as long as the room allows. Distance is the
+    # easiest thing to measure accurately and a longer run divides the reading
+    # error by a bigger number: 5 mm over 3 m is 0.17%. Isolates the
+    # wheel-diameter AVERAGE, a pure scale error.
+    'line': [
+        ('settle_pre', 0.00, 0.00, 2.0),
+        ('straight', 0.15, 0.00, 20.0),
+        ('settle_post', 0.00, 0.00, 3.0),
+    ],
+    # `spin_*` -- two full turns in place, each direction its own sequence. A
+    # differential-drive robot slips in a PIVOT, where the wheels scrub sideways
+    # and the caster drags, so this is the phase that the friction fit in
+    # docs/experiment-plan.md B10 is fitted against. Both directions, because a
+    # systematic error that adds one way subtracts the other and one direction
+    # alone cannot tell them apart.
+    #
+    # 25.133 s at 0.5 rad/s is 4*pi exactly.
+    'spin_ccw': [
+        ('settle_pre', 0.00, 0.00, 2.0),
+        ('spin', 0.00, 0.50, 25.133),
+        ('settle_post', 0.00, 0.00, 3.0),
+    ],
+    'spin_cw': [
+        ('settle_pre', 0.00, 0.00, 2.0),
+        ('spin', 0.00, -0.50, 25.133),
+        ('settle_post', 0.00, 0.00, 3.0),
+    ],
+    # `square_*` -- UMBmark (Borenstein & Feng, 1995), the standard benchmark
+    # for odometry error in a differential-drive robot. Drive a square open
+    # loop, return to the start, measure how far off you are.
+    #
+    # Both directions are not a repeat: unequal wheel diameters and an
+    # inaccurate wheelbase produce DIFFERENT return-error signatures CW versus
+    # CCW, so running both is what lets the two be solved for separately. One
+    # direction alone gives a number that cannot be attributed.
+    #
+    # 2.0 m sides (13.333 s at 0.15) and 90 degree corners (3.1416 s at 0.5)
+    # rather than UMBmark's 4 m: 2 m is what the room has, and the error terms
+    # scale with path length, so the analysis is unchanged as long as the side
+    # length is reported with the result.
+    #
+    # Stops bracket every leg, as everywhere else in this file, so a corner
+    # cannot bleed into the side after it and each is attributable in the JSON.
+    'square_cw': _square(-0.5),
+    'square_ccw': _square(0.5),
     # Drive into something and keep driving. The question is not whether the
     # robot stops -- both simulators will stop it -- but what the ODOMETRY does
     # once it has: wheels that keep turning against a wall integrate distance
@@ -137,6 +213,12 @@ class DriveTest(Node):
         self.declare_parameter('label', 'unknown')
         self.declare_parameter('out', '')
         self.declare_parameter('sequence', 'default')
+        # Hand-measured ground truth, for backend:=real where the topic does
+        # not exist. [forward_m, lateral_m] in the START frame and the net
+        # heading in degrees -- the marks on the experiment-1 run sheet.
+        self.declare_parameter('truth_xy_m', [])
+        self.declare_parameter('truth_yaw_deg', Parameter.Type.DOUBLE)
+        self.declare_parameter('truth_method', '')
         self.declare_parameter('bag_dir', '')
         self.label = self.get_parameter('label').value
         self.out = self.get_parameter('out').value
@@ -306,6 +388,8 @@ class DriveTest(Node):
                   'wheel_separation': WHEEL_SEPARATION,
                   'wheel_radius': WHEEL_RADIUS,
                   'sequence': results,
+                  'net': self._net(),
+                  'hand': self._hand(),
                   'final': self._pose()}
         if self.out:
             with open(self.out, 'w') as f:
@@ -321,6 +405,82 @@ class DriveTest(Node):
             give_back(raw)
             self.get_logger().info('wrote ' + raw)
         return report
+
+    def _net(self):
+        """The whole run as the three numbers a tape measure would give.
+
+        Experiment 1 compares a person with a tape against a simulator, so the
+        simulator has to report the SAME scalars, defined the same way, or the
+        two are not measurements of one quantity. These are exactly the marks
+        on the run sheet:
+
+            forward_m   how far along the starting heading it ended up
+            lateral_m   how far to the side of it  -- `line` mark 2,
+                        and with forward_m the (x, y) return offset of
+                        `square` marks 1 and 2
+            yaw_rad     net heading change, accumulated rather than wrapped --
+                        `spin` mark 1 (against 4*pi) and `square` mark 3
+
+        Resolved into the START frame, not the world frame, for two reasons:
+        the two simulators' ground-truth origins differ (Gazebo world-absolute,
+        Isaac spawn-relative), and on hardware there is no world frame at all --
+        there is a chalk mark and a robot that was placed on it.
+
+        From ground truth where there is any, and from /odom where there is
+        not, with `source` saying which. On hardware /odom is NOT ground truth,
+        it is the thing being measured, so the pair only means something next
+        to the hand figures in `hand`.
+        """
+        if not self.samples:
+            return None
+        a, b = self.samples[0], self.samples[-1]
+        truth = 'gx' in a
+        x0, y0 = (a['gx'], a['gy']) if truth else (a['x'], a['y'])
+        x1, y1 = (b['gx'], b['gy']) if truth else (b['x'], b['y'])
+        yaw0 = a['gyaw'] if truth else a['yaw']
+        key = 'gyaw' if truth else 'yaw'
+        # Accumulated, for the same reason _summarise accumulates: `spin` turns
+        # 4*pi and `square` turns 2*pi, and both wrap to nearly nothing.
+        dyaw = sum(math.atan2(math.sin(q[key] - p[key]),
+                              math.cos(q[key] - p[key]))
+                   for p, q in zip(self.samples, self.samples[1:]))
+        dx, dy = x1 - x0, y1 - y0
+        c, s_ = math.cos(-yaw0), math.sin(-yaw0)
+        return {
+            'source': '/ground_truth/odom' if truth else '/odom (NOT truth)',
+            'forward_m': round(dx * c - dy * s_, 5),
+            'lateral_m': round(dx * s_ + dy * c, 5),
+            'distance_m': round(math.hypot(dx, dy), 5),
+            'yaw_rad': round(dyaw, 5),
+            'yaw_deg': round(math.degrees(dyaw), 3),
+        }
+
+    def _hand(self):
+        """The same three numbers, measured by a person, or None.
+
+        The real robot has no /ground_truth/odom and never will, so on that
+        backend these arrive as parameters and land in the same file beside the
+        commanded sequence and the bag. Without this the hardware leg of
+        experiment 1 writes `net.source = /odom (NOT truth)` and the
+        wheel -> body layer is silently not measured at all.
+
+        Angles in degrees because that is what comes off a protractor or a
+        pointer against a wall; converted here so the file carries both.
+        """
+        xy = list(self.get_parameter('truth_xy_m').value or [])
+        yaw = self.get_parameter('truth_yaw_deg').value
+        method = self.get_parameter('truth_method').value
+        if not xy and yaw is None:
+            return None
+        out = {'method': method or 'unstated'}
+        if len(xy) >= 2:
+            out['forward_m'] = float(xy[0])
+            out['lateral_m'] = float(xy[1])
+            out['distance_m'] = round(math.hypot(float(xy[0]), float(xy[1])), 5)
+        if yaw is not None:
+            out['yaw_deg'] = float(yaw)
+            out['yaw_rad'] = round(math.radians(float(yaw)), 5)
+        return out
 
     @staticmethod
     def _summarise(name, lin, ang, secs, phase):
