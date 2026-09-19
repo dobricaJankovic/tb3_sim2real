@@ -132,11 +132,35 @@ def check_provenance(world, res):
 
 # --- round trip --------------------------------------------------------------
 
+def sdf_floor(path):
+    """The generated ground plane's friction, or None if it is not ours.
+
+    The floor used to be `include`d from Gazebo's model database, where its
+    mu 100 / mu2 50 was undeclared and unreachable. It is written out in full
+    now so that world.yaml owns it, which means it can also be checked.
+    """
+    for model in ET.parse(path).getroot().iter('model'):
+        if model.get('name') != 'ground_plane':
+            continue
+        ode = model.find('.//collision/surface/friction/ode')
+        if ode is None:
+            return None
+        return {'mu': float(ode.findtext('mu')),
+                'mu2': float(ode.findtext('mu2'))}
+    return None
+
+
 def sdf_bodies(path):
-    """Body name -> (pose, geometry) as the generated .world actually holds it."""
+    """Body name -> (pose, geometry) as the generated .world actually holds it.
+
+    The ground plane is skipped: it is the floor, not a body the manifest
+    declares, and its collision would otherwise read as an undeclared model.
+    """
     root = ET.parse(path).getroot()
     out = {}
-    for col in root.iter('collision'):
+    collisions = [c for m in root.iter('model') if m.get('name') != 'ground_plane'
+                  for c in m.iter('collision')]
+    for col in collisions:
         pose = [float(v) for v in (col.findtext('pose') or '0 0 0 0 0 0').split()]
         geom = col.find('geometry')
         kind = next(iter(geom), None)
@@ -159,6 +183,40 @@ def sdf_bodies(path):
 
 def close(a, b, tol=1e-6):
     return all(abs(float(x) - float(y)) <= tol for x, y in zip(a, b))
+
+
+def check_surface(world, res):
+    """The floor's friction in the .world is the floor's friction in world.yaml.
+
+    Friction is half of a contact pair and the wheel is the other half, set to
+    the same number by backends/gazebo.launch.py so that ODE's pair-combination
+    rule -- believed to be the minimum, unverified -- cannot change the answer.
+    This checks the half a generator writes; the other half is asserted by
+    test_gazebo_wheel_friction_follows_the_manifest.
+
+    Isaac Sim's floor is NOT checked here and cannot be: this script parses no
+    USD (see the module docstring), and the Isaac floor is authored at runtime
+    by turtlebot3_isaacsim rather than baked into the stage. That side is a
+    task in that repository -- see docs/roadmap.md 7.
+    """
+    spec = world.artifact('gazebo')
+    if spec['mode'] != 'generated':
+        return
+    path = os.path.join(world.dir, spec['path'])
+    if not os.path.isfile(path):
+        return
+    want = world.surface
+    got = sdf_floor(path)
+    if got is None:
+        res.fail(f'{spec["path"]} has no ground_plane with a declared friction '
+                 f'— regenerate it: scripts/build_world.py {world.name}')
+        return
+    if not close([got['mu'], got['mu2']], [want['mu'], want['mu2']]):
+        res.fail(f'{spec["path"]} floor friction mu={got["mu"]:g}/'
+                 f'{got["mu2"]:g} but world.yaml declares '
+                 f'{want["mu"]:g}/{want["mu2"]:g}')
+        return
+    res.ok(f'floor friction mu={want["mu"]:g} matches world.yaml')
 
 
 def check_roundtrip(world, res):
@@ -409,6 +467,7 @@ def check(name):
 
     check_provenance(world, res)
     check_roundtrip(world, res)
+    check_surface(world, res)
     check_footprint(world, res)
     return res
 

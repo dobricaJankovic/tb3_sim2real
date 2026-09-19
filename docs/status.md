@@ -183,11 +183,15 @@ pose:
 | `arc`, path length | 0.4927 m | 0.4900 m | **−0.55%** |
 | `straight`, distance | 0.7358 m | 0.7370 m | **+0.16%** |
 
-**Gazebo has no measurable slip**, which is what `mu = 100000` on its wheels
-predicts, and it is the number Isaac's **−7.1%** pivot slip now has something to
-be compared against. Say it as "Gazebo's stock burger has slip disabled", not
-as "Gazebo's contact model predicts no slip": 100000 is a sentinel, not a
-physical value. `docs/experiment-plan.md` B10.
+**Gazebo had no measurable slip**, which is what `mu = 100000` on its wheels
+predicts. The careful wording here was "Gazebo's stock burger has slip
+disabled", not "Gazebo's contact model predicts no slip", because 100000 is a
+sentinel rather than a physical value — **and on 2026-09-19 that distinction
+was tested and turned out to be the whole story.** With the coefficient
+declared in the manifest at 1.0, the same sweep gives −2.6% at `wz = 0.2` and
+**−15.7% at `wz = 1.5`**, straight-line slip unchanged. The numbers in the
+table above are therefore *upstream-sentinel* numbers; see
+`docs/worknotes/2026-09-19-gazebo-friction.md` and the dated section below.
 
 Note the sign: on Gazebo the body moves very slightly FURTHER than the wheels
 in a straight line, where Isaac's body falls short. At 0.16% over 0.74 m that
@@ -232,6 +236,49 @@ Isaac publishes **everything** at exactly its 60 Hz render rate; Gazebo's rates
 are per-plugin. `scan_test` now reports `scan_rate_hz` and `wall_rate_hz` side
 by side in every run, so this confound cannot come back — and on hardware the
 same field is the real robot's own clock, which pairs with B2.
+
+### Gazebo's missing slip was one disowned number — 2026-09-19
+
+`turtlebot3_gazebo`'s `model.sdf` sets both tyres to `mu = 100000` under its own
+comment, `<!-- This friction pamareter don't contain reliable data!! -->`, and
+this repository's generator `include`d Gazebo's stock ground plane, whose
+`mu 100 / mu2 50` was equally undeclared. Neither number was in the manifest, so
+`check_worlds.py` could prove geometry parity and nothing about the surface the
+robot drives on.
+
+Four conditions, one `sweep` each, run against the backend directly so the two
+halves of the contact could be varied independently. Pivot slip, ground truth
+against wheel-integrated rotation:
+
+| floor | wheel | wz=0.2 | wz=0.5 | wz=1.0 | wz=1.5 |
+|---|---|---|---|---|---|
+| 100/50 | **100000** (upstream) | −0.30% | −0.20% | −0.14% | −0.14% |
+| 100/50 | 1.0 | −2.05% | −4.13% | −9.02% | −15.14% |
+| 1.0 | 100000 | −2.51% | −4.60% | −9.49% | −15.60% |
+| **1.0** | **1.0** (now the default) | **−2.58%** | **−4.66%** | **−9.55%** | **−15.66%** |
+
+Straight-line slip is unchanged in every condition (±0.3%), which is right: a
+robot that turns by scrubbing two wheels against a dragging skid slips in a
+pivot and rolls in a straight line.
+
+**Three results.** "Gazebo cannot show slip" was false — it was configured not
+to. **ODE combines a contact pair by the minimum**, now measured rather than
+assumed: lowering either side alone reproduces nearly the whole effect. And at
+`wz = 0.5` Gazebo lands on **−4.66%** against Isaac Sim's **−4.61%** — the one
+rate where a directly comparable Isaac run with ground truth exists — so an
+order-of-magnitude disagreement between two physics engines closes to 0.05
+percentage points once the sentinel is replaced by a declared value.
+
+**1.0 is an assumption, not a measurement** (dry rubber on vinyl; the honest
+band is ~0.6–1.0 and this is the top of it, the end that flatters Gazebo).
+`docs/experiment-plan.md` B10 replaces it with a fit to the real robot's
+measured pivot slip. `slip1`/`slip2` stay 0.0 — they are force-dependent slip,
+not an on/off switch — and upstream's ball-joint caster stays a rolling caster
+where the real robot drags a skid, recorded as a limitation rather than
+patched. Full method: `docs/worknotes/2026-09-19-gazebo-friction.md`.
+
+**Every Gazebo measurement in this document taken before 2026-09-19 was taken
+at the sentinel.**
 
 ### The two machines' clocks now agree — 2026-09-19
 

@@ -502,15 +502,16 @@ ros2 run tb3_bringup nav_test --ros-args \
 
 Same map, same goals, same `nav2_params.yaml` on all three. Repeats per B4.
 
-## B10. Friction — an open decision, to be settled with real data
+## B10. Friction — half settled 2026-09-19, the value still needs the robot
 
 Floor friction is **not** part of the single source of truth, and the two
 simulators are far apart:
 
 | | floor | wheel |
 |---|---|---|
-| gazebo | `model://ground_plane`, mu 100 / mu2 50 | mu **100000** |
-| isaacsim | authored `GroundPlane`, 1.0 / 1.0, restitution 0 | `turtlebot3_isaacsim`'s wheel material |
+| gazebo, until 2026-09-19 | `model://ground_plane`, mu 100 / mu2 50 | mu **100000** |
+| **gazebo, now** | **`physics.floor.mu` in world.yaml, 1.0** | **the same 1.0** |
+| isaacsim | authored `GroundPlane`, 1.0 / 1.0, restitution 0 | 1.0, authored into the .usd |
 | real | the lab floor — **unknown until B4** | rubber tyre + plastic skid |
 
 `world.yaml` has no `physics:` block and `scripts/build_world.py` writes no
@@ -527,6 +528,40 @@ model predicts no slip".
 robot's slip sits far from both simulators, tuning friction is on the table —
 it makes no sense to report a large divergence as a finding when one arbitrary
 sentinel parameter explains it.
+
+### Done 2026-09-19: the sentinel is gone, and it explained nearly all of it
+
+The structural half no longer waits on the robot and has been built. Friction is
+manifest data now — `physics.floor.mu`, default 1.0, written into the generated
+world and carried to the wheel — so it is inside what `check_worlds.py` proves
+instead of being two undeclared defaults in two packages.
+
+Measured, four conditions, one `sweep` each: Gazebo pivot slip goes from −0.20%
+to **−4.66%** at `wz = 0.5` and to **−15.66%** at `wz = 1.5`, straight-line slip
+unchanged. **At `wz = 0.5` that is 0.05 percentage points from Isaac Sim's
+−4.61%.** Two physics engines that disagreed by an order of magnitude agree once
+one number nobody chose is replaced by one that is declared. ODE's
+pair-combination rule was measured on the way and it is the **minimum**. Full
+table and the traps: `docs/worknotes/2026-09-19-gazebo-friction.md`.
+
+**What still needs the robot, and it is now the only open part:** 1.0 is dry
+rubber on vinyl from a handbook band of roughly 0.6–1.0, and it is the top of
+that band — the end that flatters Gazebo. B4 measures the real robot's pivot
+slip; fitting `physics.floor.mu` to reproduce it turns the assumption into a
+calibration against this platform on this floor. Until that happens **no text
+may call 1.0 measured**, and the band is not a specific paper read for this
+repository — the citation has to be verified before it is used.
+
+*Why fitting is legitimate and not the banned move: it parameterises a model
+from ground truth, exactly as the 240 Hz physics rate did. Tuning Gazebo until
+it agreed with Isaac would be the banned move, and the agreement above was an
+outcome of setting a physical value, not a target.*
+
+*A direct measurement would be better than a fit and was designed: drawbar pull
+for the tyre, a dead-drag for the skid, a load split from a kitchen scale. It
+needs a luggage/fishing scale, which is not available, so it is recorded here
+as the stronger method if one ever appears — it would be an independent
+cross-check on the fit rather than a replacement for it.*
 
 The rule that still holds, from `docs/experiment.md`: **never tune one backend
 to match another backend.** Setting friction from a value measured on hardware

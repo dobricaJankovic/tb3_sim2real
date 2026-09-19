@@ -40,6 +40,84 @@ MODES = ('generated', 'adopted', 'none')
 
 BACKENDS = ('real', 'gazebo', 'isaacsim')
 
+# --- surfaces -----------------------------------------------------------------
+#
+# Friction is manifest data for exactly the reason colour is. `mu: 100000` in
+# turtlebot3_gazebo's model.sdf is an ODE number that only Gazebo can read, and
+# it reached this repository as an undeclared default nobody chose: upstream
+# ships it with its own comment above it, verbatim,
+#
+#     <!-- This friction pamareter don't contain reliable data!! -->
+#
+# so it is not a modelling decision that was made and can be defended, it is a
+# placeholder. It is also the whole reason "Gazebo cannot show slip": the honest
+# sentence is "Gazebo's stock burger has slip disabled by an unreliable
+# coefficient", not "Gazebo's contact model predicts no slip".
+#
+# A coefficient of friction is a property of a contact PAIR, not of a surface,
+# so a manifest that declares only the floor has declared half of it. The
+# robot's own surfaces belong with the robot asset (turtlebot3_isaacsim already
+# authors them into the .usd); what the WORLD owns is the floor, because the
+# floor is the room.
+#
+# The two engines combine a pair differently and neither documents it where you
+# would look: ODE's rule is believed to be the minimum and is unverified here,
+# PhysX defaults to averaging. That question is sidestepped rather than
+# answered — when both sides of a contact carry the SAME coefficient, minimum,
+# average and geometric mean all agree, so FLOOR_MU is also what the wheel is
+# set to, and the two backends then resolve to the same effective number
+# whatever their rule is. The skid is the exception and has to be lower than
+# the wheel, so it carries `min` explicitly on both.
+#
+# 1.0 is DRY RUBBER ON VINYL, and it is an assumption, not a measurement.
+# Handbook values for rubber on dry solids run near 1.0; flooring
+# slip-resistance testing (ASTM D2047, DIN 51131) with standardised rubber
+# sliders reads lower, nearer 0.5-0.7. The honest band is about 0.6-1.0 and
+# this is the TOP of it, which is the end that flatters Gazebo — a lower value
+# slips more, not less.
+#
+# It is 1.0 rather than mid-band on purpose: turtlebot3_isaacsim already
+# authors exactly 1.0 for its wheel and floor, so adopting it changes ONE
+# backend and leaves every Isaac measurement taken before this still
+# comparable. docs/experiment-plan.md B10 replaces it with a value fitted to
+# the real robot's measured pivot slip once experiment 1 is in; until then no
+# text should call it measured.
+#
+# BEFORE CITING THIS IN A THESIS: verify the source. The band above is
+# handbook-class knowledge, not a specific paper read for this repository.
+FLOOR_MU = 1.0
+
+# The skid, not the tyre. A caster that grips fights the wheels on every
+# in-place turn; turtlebot3_isaacsim authors 0.1 with combine `min` for this and
+# writes down why. Gazebo does not need it — upstream makes caster_back_joint a
+# BALL joint, so its caster rolls where the real robot's and Isaac's slide.
+# That difference is structural, not a coefficient, and is deliberately left
+# alone: the asset is upstream's.
+SKID_MU = 0.1
+
+
+def surface(manifest):
+    """The floor's contact properties as {'mu': f, 'mu2': f}.
+
+    `physics.floor.mu` in the manifest, defaulting to FLOOR_MU. mu2 follows mu
+    unless given: an isotropic floor is the assumption until something measures
+    otherwise, and two numbers that are always equal invite one of them to be
+    edited alone.
+    """
+    spec = ((manifest.get('physics') or {}).get('floor') or {})
+    try:
+        mu = float(spec.get('mu', FLOOR_MU))
+        mu2 = float(spec.get('mu2', mu))
+    except (TypeError, ValueError):
+        raise RuntimeError(
+            'physics.floor.mu and .mu2 must be numbers; got {!r}'.format(spec))
+    if not (0.0 <= mu and 0.0 <= mu2):
+        raise RuntimeError(
+            'physics.floor friction must not be negative; got mu={}, mu2={}'
+            .format(mu, mu2))
+    return {'mu': mu, 'mu2': mu2}
+
+
 # --- materials ----------------------------------------------------------------
 #
 # A body's colour has to reach two renderers that share no material system at
@@ -229,6 +307,16 @@ class World:
     @property
     def bodies(self):
         return self.manifest.get('bodies') or []
+
+    @property
+    def surface(self):
+        """The floor's contact properties, shared by every backend.
+
+        See the module's `surfaces` section: the number is declared here so it
+        reaches both generators from one place, instead of living as an
+        undeclared default inside each simulator.
+        """
+        return surface(self.manifest)
 
     @property
     def spawn(self):

@@ -119,6 +119,51 @@ def geometry_xml(world_name, geom, indent):
     raise SystemExit(f'build_world: unsupported geometry type {t!r}')
 
 
+def ground_plane(surf):
+    """The floor, authored here rather than `include`d, so it carries friction.
+
+    `<include><uri>model://ground_plane</uri></include>` pulls in Gazebo's own
+    stock model, whose surface is mu 100 / mu2 50 -- a hundred times a real
+    floor, undeclared, and invisible in both the manifest and the generated
+    world. Half of a contact pair cannot be declared in world.yaml while the
+    other half stays a default in a package nobody in this repository edits, so
+    the floor is written out in full instead of included.
+
+    Geometry matches the stock model exactly (a 100 x 100 collision plane and a
+    100 x 100 visual, grey, unshaded, casting no shadows), so nothing about the
+    scene changes except the number that was never stated.
+    """
+    return """    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <plane><normal>0 0 1</normal><size>100 100</size></plane>
+          </geometry>
+          <surface>
+            <friction>
+              <ode>
+                <mu>{mu:g}</mu>
+                <mu2>{mu2:g}</mu2>
+              </ode>
+            </friction>
+          </surface>
+        </collision>
+        <visual name="visual">
+          <cast_shadows>false</cast_shadows>
+          <geometry>
+            <plane><normal>0 0 1</normal><size>100 100</size></plane>
+          </geometry>
+          <material>
+            <ambient>0.8 0.8 0.8 1</ambient>
+            <diffuse>0.8 0.8 0.8 1</diffuse>
+            <specular>0.8 0.8 0.8 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>""".format(**surf)
+
+
 def build_world(manifest, head):
     name = manifest['name']
     parts = [
@@ -126,7 +171,7 @@ def build_world(manifest, head):
         f'<!-- {head} -->',
         '<sdf version="1.6">',
         '  <world name="default">',
-        '    <include><uri>model://ground_plane</uri></include>',
+        ground_plane(worlds.surface(manifest)),
         '    <include><uri>model://sun</uri></include>',
         '    <scene><shadows>false</shadows></scene>',
         PHYSICS,

@@ -428,6 +428,40 @@ Two things to settle before doing it:
    consumers, and is worth answering with the three-map comparison rather than
    assumed.
 
+## 7. Friction is manifest data now — the Isaac half is not
+
+Built 2026-09-19. `physics.floor.mu` in `world.yaml` (default
+`worlds.FLOOR_MU = 1.0`) is written into the generated `.world` by
+`build_world.py` — which authors the ground plane in full rather than
+`include`ing Gazebo's, whose undeclared `mu 100 / mu2 50` was the other half of
+the problem — and carried to the robot's wheels by `bringup.launch.py` through
+the temp-copy of the robot SDF that `with_ground_truth()` already established.
+`check_worlds.py` checks the floor half, a launch test checks the wheel half.
+The measurement that motivated it, and the four-condition table:
+`docs/worknotes/2026-09-19-gazebo-friction.md`.
+
+Same argument as colour, one section up in `tb3_bringup/worlds.py`: `mu: 100000`
+is an ODE number only Gazebo can read, exactly as `Gazebo/White` was an Ogre
+token only Gazebo could read.
+
+**What is left is a second source of truth, and this repository exists to
+prevent those.** `turtlebot3_isaacsim` authors its floor at runtime
+(`static_friction=1.0`, `runtime/turtlebot3_isaacsim.py`) and its wheel material
+into the asset (`scripts/import_turtlebot3.py`). Both happen to equal the
+manifest's 1.0 today, so nothing is inconsistent — and nothing checks it, and
+`check_worlds.py` parses no USD, so nothing can from this side. The fix belongs
+there: read `physics.floor.mu` from the manifest the launch is already handed.
+Until it lands, a change to `FLOOR_MU` here silently moves Gazebo and not Isaac,
+which is precisely the failure mode the registry was built to make impossible.
+
+**Not in scope, recorded so it is not reopened.** `slip1`/`slip2` stay `0.0`:
+they are ODE's force-dependent slip, a compliance proportional to applied
+force, and `0.0` means ordinary Coulomb friction rather than "slipping
+disabled". And `caster_back_joint` stays upstream's *ball* joint, so Gazebo's
+caster rolls where the real robot and Isaac drag a skid — structural, upstream's
+asset, and more useful as a documented limitation that would explain a residual
+than as a patch.
+
 ## Next steps, in order
 
 *Superseded for the hardware session by

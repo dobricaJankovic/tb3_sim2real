@@ -100,9 +100,23 @@ robot here.
 What remains is **slip, not actuation**: the wheels turn as commanded and the
 robot slides, −7% in a pivot at `wz = 0.5` against −0.5% driving straight. That
 is a real phenomenon, it is what a burger on two wheels and a skid actually
-does, and Gazebo cannot show it at all (`mu = 1e5`). **Do not compare an Isaac
-measurement with one taken before 2026-09-17 without checking the physics rate
-it ran at.**
+does. **Do not compare an Isaac measurement with one taken before 2026-09-17
+without checking the physics rate it ran at.**
+
+**"And Gazebo cannot show it at all (`mu = 1e5`)" stood here until 2026-09-19,
+and it was false.** Gazebo was *configured* not to, by a number
+`turtlebot3_gazebo`'s own `model.sdf` labels `<!-- This friction pamareter
+don't contain reliable data!! -->`. Friction is `physics.floor.mu` in the
+manifest now (default 1.0, dry rubber on vinyl, an assumption until experiment
+1 fits it), written by the generator and carried to the wheel, and Gazebo pivot
+slip goes from −0.2% to **−15.7%** at `wz = 1.5`. At `wz = 0.5` it lands on
+**−4.66%** against Isaac Sim's −4.61% — an order-of-magnitude disagreement
+between two engines closing to 0.05 points when one undeclared default is
+replaced by a declared one. Method, the four-condition table and what was
+deliberately NOT changed (`slip1/slip2`, the ball-joint caster):
+`docs/worknotes/2026-09-19-gazebo-friction.md`. **Every Gazebo measurement
+taken before 2026-09-19 was taken at the sentinel** — same trap as the physics
+rate, check which side of it a number comes from.
 
 ## Where to look
 

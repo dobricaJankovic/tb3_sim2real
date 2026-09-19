@@ -4,7 +4,35 @@
        world.yaml sha256: ad934716ce141e0bd3673e1644940bdd6b7233902b194baa77be5b01a7da0db5 -->
 <sdf version="1.6">
   <world name="default">
-    <include><uri>model://ground_plane</uri></include>
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <plane><normal>0 0 1</normal><size>100 100</size></plane>
+          </geometry>
+          <surface>
+            <friction>
+              <ode>
+                <mu>1</mu>
+                <mu2>1</mu2>
+              </ode>
+            </friction>
+          </surface>
+        </collision>
+        <visual name="visual">
+          <cast_shadows>false</cast_shadows>
+          <geometry>
+            <plane><normal>0 0 1</normal><size>100 100</size></plane>
+          </geometry>
+          <material>
+            <ambient>0.8 0.8 0.8 1</ambient>
+            <diffuse>0.8 0.8 0.8 1</diffuse>
+            <specular>0.8 0.8 0.8 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
     <include><uri>model://sun</uri></include>
     <scene><shadows>false</shadows></scene>
     <physics type="ode">

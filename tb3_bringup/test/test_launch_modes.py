@@ -235,3 +235,80 @@ def test_the_params_file_itself_is_never_edited():
     with open(params) as f:
         text = f.read()
     assert 'set_initial_pose' not in text and 'initial_pose:' not in text
+
+
+def _gazebo_backend():
+    import importlib.util
+    path = os.path.join(get_package_share_directory('tb3_bringup'),
+                        'launch', 'backends', 'gazebo.launch.py')
+    spec = importlib.util.spec_from_file_location('gazebo_backend', path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_gazebo_wheel_friction_follows_the_manifest():
+    """The wheel gets the floor's coefficient, not upstream's sentinel.
+
+    turtlebot3_gazebo ships the tyres at mu = 100000 with its own comment
+    saying the number is not real data. That single value is the whole of why
+    this backend shows no wheel slip while Isaac Sim and the real robot do, so
+    a regression here would not raise -- it would quietly restore a backend
+    that cannot slip, and the sim-to-real comparison would silently become a
+    comparison with a sentinel.
+
+    Read back off the written SDF rather than trusting the call, for the same
+    reason test_nav_pins_amcl_to_the_manifest_spawn does.
+
+    slip1/slip2 are asserted UNCHANGED. They are ODE's force-dependent slip,
+    not an on/off switch for slipping, and turning them on would add a second
+    free parameter that nothing measures. Exactly one thing moves.
+    """
+    import xml.etree.ElementTree as ET
+
+    from tb3_bringup import worlds
+
+    mod = _gazebo_backend()
+    src = os.path.join(get_package_share_directory('turtlebot3_gazebo'),
+                       'models', 'turtlebot3_burger', 'model.sdf')
+    mu = worlds.World.load('turtlebot3_world').surface['mu']
+    written = mod.with_surfaces(src, mu)
+
+    root = ET.parse(written).getroot()
+    wheels = [c for c in root.iter('collision')
+              if c.get('name') in mod.WHEEL_COLLISIONS]
+    assert len(wheels) == 2, 'both wheels must be rewritten, not one'
+    for col in wheels:
+        ode = col.find('surface/friction/ode')
+        assert float(ode.findtext('mu')) == pytest.approx(mu)
+        assert float(ode.findtext('mu2')) == pytest.approx(mu)
+        assert float(ode.findtext('slip1')) == 0.0
+        assert float(ode.findtext('slip2')) == 0.0
+
+    # The other job of the same rewrite still happens.
+    assert 'libgazebo_ros_p3d.so' in open(written).read()
+
+    # And upstream's file is untouched: this repository edits a copy.
+    assert '100000' in open(src).read()
+
+
+def test_gazebo_floor_and_wheel_carry_the_same_number():
+    """Both sides of the contact are equal, so the combine rule cannot matter.
+
+    ODE's rule for combining a contact pair is believed to be the minimum and
+    is not verified here; PhysX defaults to averaging. Setting both sides to
+    the same coefficient makes minimum, average and geometric mean agree, so
+    the two backends resolve to the same effective friction without this
+    repository having to be right about either engine's convention.
+    """
+    import xml.etree.ElementTree as ET
+
+    from tb3_bringup import worlds
+
+    world = worlds.World.load('turtlebot3_world')
+    floor = None
+    for model in ET.parse(world.gazebo_world()).getroot().iter('model'):
+        if model.get('name') == 'ground_plane':
+            floor = model.find('.//collision/surface/friction/ode')
+    assert floor is not None, 'the generated world declares no floor friction'
+    assert float(floor.findtext('mu')) == pytest.approx(world.surface['mu'])

@@ -20,15 +20,19 @@ class of divergence this repository is meant to make impossible.
 """
 
 import os
+import re
 import tempfile
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import (DeclareLaunchArgument, IncludeLaunchDescription,
+                            OpaqueFunction)
 from launch.conditions import UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+
+from tb3_bringup import worlds
 
 
 # P3D reports a link's true pose in the world frame, as nav_msgs/Odometry on
@@ -65,36 +69,122 @@ GROUND_TRUTH_PLUGIN = """
 """
 
 
-def with_ground_truth(sdf_path):
-    """Return a copy of the robot SDF with the P3D ground-truth plugin added.
+# The wheels' coefficient of friction, as upstream ships it:
+#
+#     <!-- This friction pamareter don't contain reliable data!! -->
+#     <mu>100000.0</mu>
+#
+# That comment is ROBOTIS's, verbatim, typo included. 100000 is not a physical
+# value, it is a "must not slip" sentinel, and it is the whole of why Gazebo
+# shows no wheel slip while Isaac Sim and the real robot do. The manifest
+# declares a real coefficient now (tb3_bringup.worlds, `surfaces`), and the
+# wheel is set to the SAME number as the floor so that ODE's rule for combining
+# a contact pair -- believed to be the minimum, unverified here -- cannot
+# change the effective value.
+#
+# What is deliberately NOT touched:
+#
+#   slip1/slip2, which stay 0.0. These are ODE's force-dependent slip, an extra
+#   compliance proportional to applied force; 0.0 means ordinary Coulomb
+#   friction, NOT "slipping disabled". Coulomb slip happens as soon as mu*N is
+#   exceeded, and with mu = 100000 it never was. Turning FDS on would add a
+#   second free parameter with nothing to set it from, and the point of this
+#   change is that exactly ONE thing moves.
+#
+#   caster_back_joint, which upstream makes a BALL joint, so Gazebo's caster
+#   ROLLS where the real robot and Isaac Sim drag a skid. That is a structural
+#   difference in the model rather than a coefficient, it is upstream's asset,
+#   and it is left alone -- recorded as a limitation that would explain a
+#   residual disagreement rather than patched over.
+WHEEL_COLLISIONS = ('wheel_left_collision', 'wheel_right_collision')
+
+
+def with_surfaces(sdf_path, mu):
+    """Return a copy of the robot SDF with ground truth added and wheel mu set.
 
     A copy, in a temporary file, rather than an edit: turtlebot3_gazebo's
     model.sdf is a package's installed data and belongs to that package.
+
+    Both edits in one pass, so there is one temp file per run rather than one
+    per change, and one place that knows the robot SDF is rewritten at all.
     """
     with open(sdf_path) as f:
         sdf = f.read()
-    if 'libgazebo_ros_p3d.so' in sdf:
-        return sdf_path
-    tail = sdf.rindex('</model>')
+
+    if mu is not None:
+        for name in WHEEL_COLLISIONS:
+            start = sdf.find('<collision name="{}">'.format(name))
+            if start < 0:
+                raise RuntimeError(
+                    "turtlebot3_gazebo's model.sdf has no {} — the wheel "
+                    'friction cannot be set, and leaving it at upstream\'s '
+                    'unreliable 100000 silently would make this backend the '
+                    'only one that cannot slip.'.format(name))
+            end = sdf.index('</collision>', start)
+            block = sdf[start:end]
+            patched, n = re.subn(r'<mu>[^<]*</mu>',
+                                 '<mu>{:g}</mu>'.format(mu), block)
+            patched, n2 = re.subn(r'<mu2>[^<]*</mu2>',
+                                  '<mu2>{:g}</mu2>'.format(mu), patched)
+            if not (n and n2):
+                raise RuntimeError(
+                    '{} declares no <mu>/<mu2> to replace'.format(name))
+            sdf = sdf[:start] + patched + sdf[end:]
+
+    if 'libgazebo_ros_p3d.so' not in sdf:
+        tail = sdf.rindex('</model>')
+        sdf = sdf[:tail] + GROUND_TRUTH_PLUGIN + sdf[tail:]
+
     out = tempfile.NamedTemporaryFile(
-        mode='w', suffix='.sdf', prefix='tb3_ground_truth_', delete=False)
-    out.write(sdf[:tail] + GROUND_TRUTH_PLUGIN + sdf[tail:])
+        mode='w', suffix='.sdf', prefix='tb3_robot_', delete=False)
+    out.write(sdf)
     out.close()
     return out.name
 
 
+def spawn(context, *args, **kwargs):
+    """The robot, rewritten to carry this world's floor friction.
+
+    An OpaqueFunction because the SDF has to be written before spawn_entity is
+    handed a path, and the value comes from `wheel_mu`, which is a launch
+    argument and so is not resolved until now.
+    """
+    model = os.environ.get('TURTLEBOT3_MODEL', 'burger')
+    mu = LaunchConfiguration('wheel_mu').perform(context)
+    robot_sdf = with_surfaces(
+        os.path.join(get_package_share_directory('turtlebot3_gazebo'),
+                     'models', f'turtlebot3_{model}', 'model.sdf'),
+        float(mu) if mu else None)
+    return [Node(
+        package='gazebo_ros',
+        executable='spawn_entity.py',
+        output='screen',
+        arguments=[
+            '-entity', model,
+            '-file', robot_sdf,
+            '-x', LaunchConfiguration('x_pose'),
+            '-y', LaunchConfiguration('y_pose'),
+            '-z', LaunchConfiguration('z_pose'),
+            '-Y', LaunchConfiguration('yaw'),
+        ],
+    )]
+
+
 def generate_launch_description():
     gazebo_ros = get_package_share_directory('gazebo_ros')
-    model = os.environ.get('TURTLEBOT3_MODEL', 'burger')
-    robot_sdf = with_ground_truth(os.path.join(
-        get_package_share_directory('turtlebot3_gazebo'),
-        'models', f'turtlebot3_{model}', 'model.sdf'))
 
     return LaunchDescription([
         DeclareLaunchArgument('use_sim_time', default_value='true'),
         DeclareLaunchArgument(
             'world',
             description='Path to the .world gzserver should load'),
+        # The floor's coefficient, from the manifest, applied to the wheel too
+        # so the pair resolves to it whatever ODE's combination rule is.
+        # bringup.launch.py passes world.surface['mu']; the default is for
+        # running this file directly. Empty means "leave upstream's 100000
+        # alone", which no experiment should want but a bisect might.
+        DeclareLaunchArgument('wheel_mu',
+                              default_value=str(worlds.FLOOR_MU)),
         DeclareLaunchArgument('x_pose', default_value='0.0'),
         DeclareLaunchArgument('y_pose', default_value='0.0'),
         DeclareLaunchArgument('z_pose', default_value='0.01'),
@@ -113,17 +203,5 @@ def generate_launch_description():
                 os.path.join(gazebo_ros, 'launch', 'gzclient.launch.py')),
             condition=UnlessCondition(LaunchConfiguration('headless')),
         ),
-        Node(
-            package='gazebo_ros',
-            executable='spawn_entity.py',
-            output='screen',
-            arguments=[
-                '-entity', model,
-                '-file', robot_sdf,
-                '-x', LaunchConfiguration('x_pose'),
-                '-y', LaunchConfiguration('y_pose'),
-                '-z', LaunchConfiguration('z_pose'),
-                '-Y', LaunchConfiguration('yaw'),
-            ],
-        ),
+        OpaqueFunction(function=spawn),
     ])

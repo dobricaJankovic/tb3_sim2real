@@ -166,6 +166,14 @@ def setup(context, *args, **kwargs):
         }
         backend_args['world'] = (world.gazebo_world() if backend == 'gazebo'
                                  else world.isaac_usd())
+        if backend == 'gazebo':
+            # The floor's coefficient reaches the ROBOT too. Gazebo is the only
+            # backend where the two halves of the wheel-floor contact live in
+            # different files -- the floor in the generated .world, the wheel
+            # in turtlebot3_gazebo's model.sdf -- so the manifest's value has
+            # to be carried across by hand here. Isaac Sim authors both from
+            # its own package. See tb3_bringup.worlds, `surfaces`.
+            backend_args['wheel_mu'] = f"{world.surface['mu']:g}"
         if backend == 'isaacsim':
             backend_args['world_z'] = f'{world.isaac_world_z():g}'
             # Empty means "whatever the backend defaults to". The number and
