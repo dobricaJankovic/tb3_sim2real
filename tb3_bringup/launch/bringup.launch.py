@@ -198,6 +198,7 @@ def setup(context, *args, **kwargs):
     slam = LaunchConfiguration('slam').perform(context) == 'true'
     nav = LaunchConfiguration('nav').perform(context) == 'true'
 
+    rviz = []
     if LaunchConfiguration('rviz').perform(context) == 'true':
         # Which view: the stock Nav2 one is fixed to `map`, so it is only
         # correct once something publishes that frame. In the bare mode
@@ -205,8 +206,8 @@ def setup(context, *args, **kwargs):
         # arrives draws nothing and says so only in Global Status — which is
         # the same silent-failure shape as the BEST_EFFORT /scan the
         # robot-only config also handles. See docs/troubleshooting.md.
-        actions.append(inc(ours('common/rviz.launch.py'),
-                           config='tb3.rviz' if (slam or nav) else 'tb3_robot.rviz'))
+        rviz.append(inc(ours('common/rviz.launch.py'),
+                        config='tb3.rviz' if (slam or nav) else 'tb3_robot.rviz'))
     params = os.path.join(pkg, 'config', 'nav2_params.yaml')
 
     stack = []
@@ -237,17 +238,38 @@ def setup(context, *args, **kwargs):
         # slam:=true is already set.
         stack.append(inc(nav2('navigation_launch.py'), params_file=params))
 
-    if not stack:
+    # On backend:=real there is no /clock to wait for: use_sim_time is false,
+    # wall time is already running, and nothing below is deferred.
+    if not simulated:
+        return actions + rviz + stack
+
+    # Everything that runs on use_sim_time:=true waits for /clock, and waits
+    # SILENTLY — which looks exactly like a DDS domain mismatch or a simulator
+    # that never started, and Kit can take two minutes on a cold shader cache.
+    # Start them only once something is actually publishing sim time, and say
+    # so in the log meanwhile. wait_for_sim exits on the first /clock.
+    #
+    # RViz is deferred with them, which is a change of 2026-09-19 and is NOT
+    # a verified fix — read this before trusting rviz:=true on a simulator.
+    #
+    # OBSERVED: `backend:=isaacsim` with RViz hangs. Kit loads the stage and
+    # then never returns from its first update after play(), so it never
+    # prints "Stage loaded and simulation is playing" and never publishes
+    # /clock; the launch sits there forever with no error. rviz2 died with
+    # SIGSEGV in one such run. With rviz:=false the same command reaches play
+    # in about 15 seconds. That correlation is solid — it is why the default
+    # above is now false.
+    #
+    # INFERRED, and the reason RViz moved in here: 0fe919b put RViz on the sim
+    # clock on 2026-09-18, and rviz2 with use_sim_time and no /clock yet has
+    # nothing to draw against. Deferring it until /clock exists removes that
+    # ordering entirely. Whether that is actually what wedges the GPU was
+    # never demonstrated, and a run with rviz:=true after this change still
+    # looked wrong. Treat the hang as open.
+    deferred = rviz + stack
+    if not deferred:
         return actions
 
-    if not simulated:
-        return actions + stack
-
-    # Nav2 with use_sim_time:=true waits for /clock silently, which looks
-    # exactly like a DDS domain mismatch or a simulator that never started —
-    # and Kit can take two minutes on a cold shader cache. Start it only once
-    # something is actually publishing sim time, and say so in the log
-    # meanwhile. wait_for_sim exits as soon as the first /clock arrives.
     waiter = Node(package='tb3_bringup', executable='wait_for_sim',
                   name='wait_for_sim', output='screen')
     return actions + [
@@ -258,7 +280,7 @@ def setup(context, *args, **kwargs):
         # registered` and `Node '/local_costmap/local_costmap' has already been
         # added to an executor`.
         RegisterEventHandler(OnProcessExit(target_action=waiter,
-                                           on_exit=stack,
+                                           on_exit=deferred,
                                            handle_once=True)),
     ]
 
@@ -287,8 +309,14 @@ def generate_launch_description():
                         'Nav2 in place of map_server + AMCL. Save the result '
                         'with scripts/save_map.py <world>.'),
         DeclareLaunchArgument(
-            'rviz', default_value='true',
-            description='Also start RViz'),
+            # Default false since 2026-09-19: on a simulated backend RViz is
+            # what makes `backend:=isaacsim` hang with no error at all, and a
+            # default that wedges the common case is worse than no window.
+            # Opt in with rviz:=true, and see the deferral below for what is
+            # and is not known about that path.
+            'rviz', default_value='false',
+            description='Also start RViz. Off by default: rviz:=true against '
+                        'backend:=isaacsim is currently unreliable.'),
         DeclareLaunchArgument(
             'headless', default_value='false',
             description='Run the simulator with no window (ignored by '

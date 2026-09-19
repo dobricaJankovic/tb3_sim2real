@@ -2290,3 +2290,50 @@ commanded heading) over a commanded 3.0 m straight, but not by a consistent
 amount: −0.72 m, −0.68 m, −0.38 m. A systematic sign with an inconsistent
 magnitude, reported without interpretation — floor material for this session
 was also not recorded, which is now an open gap to close before experiment 2.
+
+## 2026-09-19 — `backend:=isaacsim` hangs with no error, and it is RViz
+
+**Symptom.** `ros2 launch tb3_bringup bringup.launch.py backend:=isaacsim
+world:=<any>` sits forever. No error, no crash. Kit boots, loads the world,
+the robot and the lidar, then stops dead: the last line in its own log is
+`onResume: Stored initial time data`, the `Stage loaded and simulation is
+playing` print never happens, and `/clock` never appears — so `wait_for_sim`
+blocks the rest of the stack indefinitely.
+
+**What it was not.** Three plausible suspects were chased and all three are
+innocent, recorded here so nobody re-chases them. NVIDIA moving
+`run_isaacsim.launch.py` to `.xml` in the 6.1.0 tag: already fixed in
+`turtlebot3_isaacsim` (`877d5a0`, `AnyLaunchDescriptionSource`), and verified
+working — `run_isaacsim` starts and Kit boots. X11 and the xauth cookie: the
+window is genuinely created, Kit logs `Created window: width=1440,height=900`
+and GLFW enumerates the keyboard and mouse. The real-robot networking of
+`8462d32` (`TB3_DDS_PEERS`, the Fast DDS profile) and the system clock: a
+headless run at 16:17 UTC and a hanging windowed run at 16:36 UTC were in the
+*same* container instance — PIDs 5888→6786 monotonic, while the next run's
+PIDs restart at ~170 — so the DDS settings and the clock are constant across
+the working/failing boundary. NTP was synchronised with no steps logged. And
+the missing `/clock` is upstream of DDS entirely: the OmniGraph never ticked,
+so the message was never *produced*. A transport cannot explain that.
+
+**What it is.** RViz. `0fe919b` (2026-09-18) put RViz on the sim clock, but
+`bringup.launch.py` still started it *immediately*, before anything published
+`/clock`. With `rviz:=false` the identical command reaches play in about 15
+seconds; with RViz it hangs, and in one run `rviz2` died with SIGSEGV.
+
+**Why it hid for four days.** Every Isaac run since then went through
+`scripts/run_experiment1.sh`, which passes `rviz:=true`'s opposite —
+`headless:=true rviz:=false`. The GUI path was simply never exercised after
+the change that broke it. Kit logs confirm it: every run in this container's
+history was headless until 2026-09-19.
+
+**Done.** `rviz` now defaults to **false**, and RViz is deferred behind the
+same `wait_for_sim` gate Nav2 already used. **Not done:** the deferral is not
+a verified fix — a run with `rviz:=true` after it still looked wrong, and the
+mechanism by which RViz wedges Kit was never demonstrated. `rviz:=true` on a
+simulator is open.
+
+**Method note.** The whole diagnosis came out of Kit's own logs under
+`/isaac-sim/kit/logs/Kit/Isaac-Sim Python/6.1/` plus `/root/.ros/log/`, both
+of which persist in named volumes across container restarts. Comparing a
+known-good run against a failing one, line for line, is what located the stall
+— before anything was launched.
