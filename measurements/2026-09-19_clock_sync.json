@@ -1,0 +1,42 @@
+{
+  "label": "real",
+  "date": "2026-09-19",
+  "what": "B1 clock sync: chrony on the Pi against the workstation, and the proof",
+  "robot_uptime_at_measurement": "42 minutes",
+  "before": {
+    "robot_timesync": "systemd-timesyncd -> 10.118.16.1",
+    "workstation_timesync": "chrony -> time.cloudflare.com (done 2026-09-18)",
+    "offset_ws_minus_robot_s": -0.028,
+    "method": "ssh date +%s.%N, 5 pairs, rtt ~0.046 s"
+  },
+  "after": {
+    "robot_chrony": "active, systemd-timesyncd inactive (package handover)",
+    "selected_source": "10.118.5.241 marked '*' in chronyc sources -v",
+    "stratum": 5,
+    "system_time_offset_s": -0.0004,
+    "last_offset_s": -0.00047,
+    "rms_offset_s": 0.004554,
+    "root_delay_s": 0.041,
+    "root_dispersion_s": 0.003918,
+    "skew_ppm": 49.322,
+    "update_interval_s": 64.3
+  },
+  "independent_check": {
+    "method": "ROS header.stamp (written by the Pi) vs receive time (workstation), /scan, 90 s",
+    "why": "the plan's `date +%s.%N over ssh` check has a resolution floor of +/- rtt/2, about +/- 20 ms here, so it cannot see what chrony achieves. A one-way message delay cannot be negative, so the minimum observed stamp->receive bounds the clock offset directly.",
+    "n_scans": 442,
+    "stamp_to_receive_ms": {
+      "min": 3.0, "p50": 10.1, "p90": 23.6, "p99": 49.2, "max": 138.2
+    },
+    "negative_latencies": 0,
+    "over_200ms": 0,
+    "over_300ms": 0,
+    "conclusion": "offset(ws - robot) >= -3.0 ms, agreeing with chrony's own -0.5 ms. No scan arrives stamped in the workstation's future, which is the condition that produced the 2026-09-16 message-filter drops."
+  },
+  "firewall": {
+    "finding": "ufw is NOT enforcing on either machine",
+    "workstation": {"systemctl is-active ufw": "active", "/etc/ufw/ufw.conf ENABLED": "no", "ufw status": "inactive"},
+    "robot": {"systemctl is-active ufw": "active", "/etc/ufw/ufw.conf ENABLED": "no"},
+    "note": "docs said ufw was active on the workstation and the port-123 allow rule was mandatory. The unit is active and enabled; the firewall it manages is off. No rule was needed and none was added."
+  }
+}

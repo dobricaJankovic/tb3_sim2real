@@ -26,11 +26,10 @@ below records what it found, and two of them found the plan wrong:
 `RewrittenYaml` cannot create absent keys (B5), and `/imu` comes from Gazebo
 rather than Isaac Sim (A2).
 
-**The next thing to do is B1, and it needs the robot in the room.** Everything
-from here on does. *Session of 2026-09-19: the robot was on, and **B2 and B3 are
-done** — they need no root and do not depend on B1. B1 itself is still open: both
-halves that remain need a sudo password, one on the Pi and one on the
-workstation.*
+**Section B is open from B4 onward.** *Session of 2026-09-19, robot on:
+**B1, B2 and B3 are all done.** The next thing to do is **B4**, the open-loop
+drive sweep, and it needs clear floor and a tape measure rather than another
+password.*
 
 ## A0. The `.repos` pin — **fixed 2026-09-18, listed so it is not undone**
 
@@ -200,7 +199,7 @@ account, including the `RewrittenYaml` claim that turned out to be false:
 
 In order. Each step gates the ones after it.
 
-## B1. Clock sync, before anything is believed — **blocking; workstation half done**
+## B1. Clock sync, before anything is believed — **DONE 2026-09-19, both halves**
 
 Measured 2026-09-16: the workstation was **157 ms ahead** of the Pi, neither
 machine ran chrony, and they synced to different upstreams. 157 ms is most of an
@@ -234,24 +233,77 @@ sudo systemctl restart chrony
 sudo chronyc makestep          # take the boot jump now, not mid-run
 ```
 
-Then three checks, in this order, because the first two are the daemons'
-self-reports and the third trusts neither:
+### What happened, 2026-09-19
 
-1. **On the Pi** — `chronyc tracking` names **10.118.5.241** as `Reference ID`,
-   and `chronyc sources -v` marks that line **`*`**, not `+` or `?`. A `?` here
-   is the firewall: confirm the workstation rule with
-   `sudo ufw status | grep 123` and add it if it is missing —
-   `sudo ufw allow from 10.118.16.0/22 to any port 123 proto udp`. `ufw` is
-   active on the workstation (checked 2026-09-18), so without the rule the Pi's
-   requests are dropped silently on both sides.
-2. **On the workstation** — `sudo chronyc clients` lists the robot once it has
-   polled. (Unprivileged it answers `501 Not authorised`, which is not a
-   failure.)
-3. **`date +%s.%N` on both**, as close together as possible. **Target single- to
-   low-double-digit ms** against the 157 measured before.
+The Pi half was run by hand. It worked first time, and **no firewall rule was
+needed** — see below. `chronyc sources -v` on the Pi marks `10.118.5.241`
+**`*`**, the stock Ubuntu pool sources all `-` (not combined), which is `prefer`
+doing its job.
+
+**chrony needs about ten minutes before its own numbers mean anything**, and
+reading them too early is misleading rather than merely imprecise. One poll in:
+`Skew 1000000 ppm`, `Root dispersion 52.5 s` — it had selected the workstation
+but had no idea yet how well. At 42 minutes of uptime:
+
+| | one poll in | settled |
+|---|---|---|
+| `System time` | 1.07 ms fast | **0.40 ms slow** |
+| `Last offset` | +4.93 ms | **−0.47 ms** |
+| `Skew` | 1000000 ppm | **49.3 ppm** |
+| `Root dispersion` | 52.5 s | **3.9 ms** |
+
+### The third check had to be replaced, because it cannot see the answer
+
+The plan's third check — `date +%s.%N` on both machines — is a daemon-independent
+idea and the right instinct, but **its resolution floor is ±rtt/2, about ±20 ms
+here**. It read −28 ms before chrony and −20 ms after. That difference is not
+progress; it is the same noise twice, and the method cannot distinguish a
+perfectly synced pair from a 20 ms offset. It is what found the original 157 ms
+because 157 ms is far outside its floor.
+
+What replaces it uses ROS itself, and is both independent of chrony *and* a
+direct measurement of the thing B1 exists to protect. `/scan`'s `header.stamp`
+is written by the Pi; the receive time is read on the workstation. **A one-way
+message delay cannot be negative**, so the *minimum* observed stamp→receive
+bounds the clock offset from below with no assumption about the network.
+
+90 s of `/scan`, 442 messages, from the container:
+
+| min | p50 | p90 | p99 | max | negative | > 200 ms |
+|---|---|---|---|---|---|---|
+| **+3.0 ms** | +10.1 | +23.6 | +49.2 | +138.2 | **0** | **0** |
+
+So `offset(ws − robot) ≥ −3.0 ms`, which agrees with chrony's own −0.5 ms and
+settles B1 to within a few ms rather than within 20. **Nothing arrives stamped
+in the workstation's future** — which is precisely the condition that produced
+the 2026-09-16 message-filter drops, and with the workstation 28 ms *behind* the
+robot that morning, every scan did.
+
+The tail is now the interesting number instead. **p99 is 49 ms and the worst of
+442 was 138 ms**, against Nav2's usual `transform_tolerance` of 0.2–0.3 s. Wi-Fi
+jitter, not clock skew, is what will eat that margin on hardware — and it is
+within it today. Re-measure if a hardware Nav2 run starts dropping scans;
+`measurements/2026-09-19_clock_sync.json` is the baseline.
+
+### `ufw` was never enforcing, on either machine
+
+The plan said the port-123 rule was mandatory because "`ufw` is active on the
+workstation (checked 2026-09-18)". **That check was wrong, and the way it was
+wrong is worth keeping.** `systemctl is-active ufw` reports `active` and
+`is-enabled` reports `enabled` on *both* machines — while `/etc/ufw/ufw.conf`
+says `ENABLED=no` and `sudo ufw status` says `Status: inactive`. The systemd
+unit is up; the firewall it manages is off. The unit being active says nothing
+about whether any packet is filtered.
+
+No rule was needed and none was added. If ufw is ever turned on, the rule from
+`docs/roadmap.md` §2 becomes real again.
+
+### Still true, and still the protocol
 
 Check it **right after the Pi boots**, because that is when experiments start,
-and never let a correction land during a run.
+and never let a correction land during a run. The Pi has no RTC, so every boot
+repeats the jump: `sudo chronyc makestep` takes it immediately, and then wait
+out the ten minutes above before believing `chronyc tracking`.
 
 ## B2. Four confirmations — **done 2026-09-19, all four**
 

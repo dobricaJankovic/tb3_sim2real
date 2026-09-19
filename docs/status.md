@@ -233,6 +233,39 @@ are per-plugin. `scan_test` now reports `scan_rate_hz` and `wall_rate_hz` side
 by side in every run, so this confound cannot come back — and on hardware the
 same field is the real robot's own clock, which pairs with B2.
 
+### The two machines' clocks now agree — 2026-09-19
+
+chrony on the Pi, tracking the workstation (which became a stratum-4 server on
+2026-09-18). `docs/experiment-plan.md` B1,
+`measurements/2026-09-19_clock_sync.json`.
+
+| | 2026-09-16 | 2026-09-19 |
+|---|---|---|
+| robot syncs to | `10.118.16.1` via timesyncd | **10.118.5.241 via chrony**, `*` in `sources -v` |
+| offset | +157 ms | **−0.5 ms** (chrony), **≥ −3.0 ms** (independent) |
+
+**The independent check is a ROS measurement now, not `date` over ssh.** That
+comparison has a resolution floor of ±rtt/2 — about ±20 ms here — so it can find
+a 157 ms skew but cannot confirm a fix; it read −28 ms before chrony and −20 ms
+after, which is the same noise twice. Instead: `/scan`'s `header.stamp` is
+written by the Pi and its receive time read on the workstation, and a one-way
+delay cannot be negative, so the minimum bounds the offset with no assumption
+about the network. Over 90 s and **442 scans: min +3.0 ms, p50 +10.1, p99 +49.2,
+max +138.2, and zero negative.** Nothing arrives stamped in the workstation's
+future — the condition behind the 2026-09-16 message-filter drops.
+
+**What this turns into, for hardware Nav2 runs:** the risk is no longer skew, it
+is the Wi-Fi tail. p99 at 49 ms and a worst-of-442 at 138 ms sit inside Nav2's
+usual `transform_tolerance` of 0.2–0.3 s, but not by much. That baseline is the
+thing to re-measure if a real run starts dropping scans.
+
+Two traps found on the way, both recorded in `docs/experiment-plan.md` B1:
+**`chronyc tracking` is meaningless for its first ten minutes** (one poll in, it
+reported a skew of 1000000 ppm while already tracking the right server), and
+**`systemctl is-active ufw` says `active` on both machines while ufw itself is
+`ENABLED=no` and enforcing nothing** — which is where the docs' "ufw is active,
+the rule is mandatory" claim came from. No firewall rule was needed.
+
 ### The real robot's interface, measured for the first time — 2026-09-19
 
 The robot was on, its stock `robot.launch.py` running on the Pi, and everything

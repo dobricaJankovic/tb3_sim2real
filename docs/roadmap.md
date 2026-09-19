@@ -50,7 +50,7 @@ exact known location in the real room. The manifest's spawn coordinates become
 that spot. Without this the pinned pose is a lie and AMCL starts wrong, so the
 marker is part of the experimental protocol, not a convenience.
 
-## 2. Clock sync between robot and workstation
+## 2. Clock sync between robot and workstation — **done 2026-09-19**
 
 Not `use_sim_time`, which asks *which clock a node reads* (`/clock` vs the OS).
 This asks *whether two machines' OS clocks agree*. On hardware both sides run
@@ -73,9 +73,11 @@ shut down and then *jumps* when NTP corrects it. So this is not a constant
 offset that could be tolerated — it is large at boot and steps
 discontinuously, and a step mid-run invalidates tf caches on both sides.
 
-**To do:** chrony on both, the Pi syncing to the workstation so the two agree
-even when the campus network does not. Do this before trusting any real-robot
-measurement.
+**Done:** chrony on both, the Pi syncing to the workstation so the two agree
+even when the campus network does not — the workstation 2026-09-18, the Pi
+2026-09-19. The reasoning below is kept because it is why the configuration
+looks the way it does; what was measured afterwards is
+`docs/experiment-plan.md` B1.
 
 ### Measured state, 2026-09-16
 
@@ -135,9 +137,17 @@ Pi — take the big jump once, immediately, before anything is launched.
 `makestep` is the whole story. `rtcsync` in the stock file is dead weight here
 with no RTC, harmless either way.)
 
-**`ufw` IS active on the workstation** (checked 2026-09-18), so the rule is not
-optional — without it the Pi's NTP requests are dropped and chrony on the robot
-sits at `?` forever with nothing on either machine saying why:
+**`ufw` is NOT enforcing on either machine — corrected 2026-09-19.** This
+section said it was active on the workstation and the rule was mandatory. The
+check behind that was `systemctl is-active ufw`, which reports `active` (and
+`is-enabled` reports `enabled`) on *both* machines — while `/etc/ufw/ufw.conf`
+carries `ENABLED=no` and `sudo ufw status` answers `Status: inactive`. **The
+unit is up; the firewall it manages is off.** The Pi synced first time with no
+rule added.
+
+Keep the rule written down, because it is right the day ufw is turned on, and a
+`?` that never becomes `*` in `chronyc sources -v` is exactly what a silently
+dropped NTP request looks like:
 
 ```
 sudo ufw allow from 10.118.16.0/22 to any port 123 proto udp
@@ -174,6 +184,14 @@ interesting one, since that is when experiments start — check it then, not
 after the machine has been up an hour. And a correction applied *during* a run
 is worse than a constant offset, because it invalidates tf caches on both
 sides; let the clock settle before launching anything.
+
+*Amended 2026-09-19, after doing it.* The `date +%s.%N` comparison is kept above
+because it is how the original 157 ms was found, but **it cannot confirm a
+success** — its floor is ±rtt/2, about ±20 ms over this Wi-Fi, and it read −28 ms
+before chrony and −20 ms after. Use the ROS measurement in
+`docs/experiment-plan.md` B1 instead. And `chronyc tracking` is meaningless for
+the first ten minutes: one poll in it reported a skew of 1000000 ppm and a root
+dispersion of 52 seconds while already tracking the right server.
 
 ## 3. `slam:=true`, on every backend — **built, 2026-09-16**
 
@@ -417,12 +435,14 @@ Two things to settle before doing it:
 the two experiments and says which half needs the robot. The reasoning for each
 decision stays here.*
 
-1. **chrony on both machines.** Cheap, and it removes a whole class of ghost
-   failure. Prerequisite for trusting any hardware measurement. *The
-   **workstation is done, 2026-09-18** — serving on 10.118.5.241, section 2 has
-   what was verified. What remains is the Pi: one `apt install`, one `server`
-   line, and the three checks in `docs/experiment-plan.md` B1. Needs the robot
-   powered on and a sudo password there.*
+1. ~~**chrony on both machines.**~~ **Done, both halves** — the workstation
+   2026-09-18, the Pi 2026-09-19. The Pi tracks 10.118.5.241 at **−0.5 ms**, and
+   the check that trusts neither daemon is now a ROS one:
+   `/scan`'s stamp→receive across the two machines has a **minimum of +3.0 ms
+   over 442 messages and no negative values**, which bounds the offset without
+   assuming anything about the network. The `date +%s.%N` check this section
+   originally specified cannot resolve better than ±rtt/2 ≈ ±20 ms and is
+   retired. `docs/experiment-plan.md` B1.
 2. **A systemd unit on the Pi** running `robot.launch.py` at boot. Deletes
    HDMI, password and SSH from the workflow: power on, wait, it publishes.
 3. ~~**`set_initial_pose` from the manifest**, replacing the `/initialpose`
