@@ -43,8 +43,11 @@ worlds/*/gazebo_snapshot.*
 worlds/*/isaac/snapshot.png
 
 # Raw drive_test traces; the committed summaries beside them are the record.
-measurements/*.samples.json
-measurements/*.beams.json
+# `**` because a bare `measurements/*.samples.json` matches one level only, and
+# the official runs live in measurements/experiment1/ -- 46 MB of traces showed
+# up as untracked the first time that directory was filled.
+measurements/**/*.samples.json
+measurements/**/*.beams.json
 
 # Rosbags, for the same reason and more so: megabytes of raw messages per run,
 # written by drive_test and nav_test with bag_dir:=. The bag is the thing you

@@ -45,9 +45,16 @@ mkdir -p "$OUT"
 # A stray publisher on the domain would drive the robot in the other
 # simulator, or the real one. This has happened; refuse rather than discover it
 # in the numbers afterwards.
-if pgrep -f "ros2 launch|gzserver|isaac-sim" > /dev/null; then
+# drive_test and robot_state_publisher are in the pattern because they are
+# exactly what a KILLED run orphans: the launch dies, those two survive, and a
+# leftover drive_test resumes the moment a new simulator publishes /clock --
+# which silently contaminated a run the first time this matrix was driven.
+STRAY="ros2 launch|gzserver|isaac-sim|drive_test|robot_state_publisher"
+if pgrep -f "$STRAY" > /dev/null; then
   echo "run_experiment1.sh: something is already running on this domain:" >&2
-  pgrep -af "ros2 launch|gzserver|isaac-sim" >&2
+  pgrep -af "$STRAY" >&2
+  echo "a killed launch orphans gzserver and robot_state_publisher; they need" >&2
+  echo "kill -9 by PID, and ros2 daemon stop afterwards." >&2
   exit 3
 fi
 
