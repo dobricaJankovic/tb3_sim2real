@@ -34,7 +34,7 @@ from launch.actions import (
 )
 from launch.event_handlers import OnProcessExit
 from launch.events import Shutdown
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 
 
@@ -45,13 +45,19 @@ def generate_launch_description():
         package='rviz2',
         executable='rviz2',
         name='rviz2',
-        arguments=['-d', os.path.join(pkg, 'rviz', 'tb3.rviz')],
+        arguments=['-d', PathJoinSubstitution(
+            [pkg, 'rviz', LaunchConfiguration('config')])],
         parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}],
         output='screen',
     )
 
     return LaunchDescription([
         DeclareLaunchArgument('use_sim_time', default_value='false'),
+        # tb3.rviz is fixed to `map`, which exists only once AMCL or
+        # slam_toolbox is running. bringup.launch.py passes tb3_robot.rviz for
+        # the bare mode, where that frame never appears and RViz would render
+        # nothing while reporting it in a row nobody reads.
+        DeclareLaunchArgument('config', default_value='tb3.rviz'),
         rviz,
         # Closing the window ends the run, as it did upstream: RViz is the only
         # thing with a window under backend:=real, so leaving the launch alive

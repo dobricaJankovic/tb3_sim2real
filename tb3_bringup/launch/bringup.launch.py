@@ -186,12 +186,19 @@ def setup(context, *args, **kwargs):
         inc(ours(f'backends/{backend}.launch.py'), **backend_args),
     ]
 
-    if LaunchConfiguration('rviz').perform(context) == 'true':
-        actions.append(inc(ours('common/rviz.launch.py')))
-
     # The workstation layer: three modes, documented at the top of this file.
     slam = LaunchConfiguration('slam').perform(context) == 'true'
     nav = LaunchConfiguration('nav').perform(context) == 'true'
+
+    if LaunchConfiguration('rviz').perform(context) == 'true':
+        # Which view: the stock Nav2 one is fixed to `map`, so it is only
+        # correct once something publishes that frame. In the bare mode
+        # (neither flag) nothing does, and an RViz fixed to a frame that never
+        # arrives draws nothing and says so only in Global Status — which is
+        # the same silent-failure shape as the BEST_EFFORT /scan the
+        # robot-only config also handles. See docs/troubleshooting.md.
+        actions.append(inc(ours('common/rviz.launch.py'),
+                           config='tb3.rviz' if (slam or nav) else 'tb3_robot.rviz'))
     params = os.path.join(pkg, 'config', 'nav2_params.yaml')
 
     stack = []

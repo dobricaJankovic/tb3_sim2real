@@ -1,5 +1,28 @@
 # Things that fail silently
 
+- **RViz shows no `/scan`, and reports nothing.** Two independent causes, both
+  silent, both found on 2026-09-19 with a robot that was publishing perfectly:
+
+  1. **QoS.** The LDS-01 driver publishes `/scan` **`BEST_EFFORT`**; RViz
+     subscribes **`RELIABLE`** by default, and an incompatible pair delivers
+     zero messages. RViz does not say so — a command-line subscriber does:
+     `New publisher discovered on topic '/scan', offering incompatible QoS. No
+     messages will be received from it. Last incompatible policy: RELIABILITY`.
+     **Fix:** the display's *Topic → Reliability Policy → Best Effort*. Adding a
+     LaserScan display by hand is what gets you the bad default; both configs in
+     `tb3_bringup/rviz/` already set it. Confirm which side is wrong with
+     `ros2 topic info /scan --verbose`, which prints the publisher's offer.
+  2. **Fixed frame.** `tb3.rviz` is stock `turtlebot3_navigation2` and is fixed
+     to **`map`**, which exists only while AMCL or slam_toolbox runs. In the
+     bare mode — `backend:=real` with neither `nav` nor `slam`, the mode whose
+     entire purpose is seeing whether the robot is alive — nothing publishes it,
+     so every display is dropped and the only complaint is a Global Status row.
+     **Fixed 2026-09-19:** `bringup.launch.py` passes `tb3_robot.rviz` (fixed to
+     `odom`, RobotModel + TF + scan) whenever neither flag is set.
+
+  A one-line check that skips RViz entirely and tells you which layer is broken:
+  `ros2 topic hz /scan` sees the data, `ros2 run tf2_ros tf2_echo odom
+  base_scan` sees the frames.
 - **`ROS_DOMAIN_ID` mismatch.** The stock TurtleBot3 image hardcodes `30` in
   `.bashrc`; Isaac Sim defaults to `0`. Different domains = total silence, no
   error. Set it explicitly for both services (compose does).
