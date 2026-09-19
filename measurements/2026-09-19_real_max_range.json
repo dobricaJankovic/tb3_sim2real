@@ -1,0 +1,184 @@
+{
+  "label": "real",
+  "date": "2026-09-19",
+  "what": "LDS-01 effective maximum range, stationary, against ~5 m of open space",
+  "scans": 120,
+  "beams_per_scan": 360,
+  "advertised": {
+    "range_min": 0.11999999731779099,
+    "range_max": 3.5
+  },
+  "observed": {
+    "max_range_m": 4.2,
+    "p99_9": 4.192,
+    "p99": 4.112,
+    "n_finite": 18172,
+    "n_total": 43200,
+    "beyond_advertised_max": 3518,
+    "beyond_4m": 674,
+    "beyond_4_5m": 0,
+    "beyond_5m": 0
+  },
+  "return_rate_vs_distance": {
+    "0.5-1.0 m": {
+      "beams": 43,
+      "mean_return_rate": 0.965
+    },
+    "1.0-1.5 m": {
+      "beams": 27,
+      "mean_return_rate": 0.866
+    },
+    "1.5-2.0 m": {
+      "beams": 37,
+      "mean_return_rate": 0.88
+    },
+    "2.0-2.5 m": {
+      "beams": 12,
+      "mean_return_rate": 0.68
+    },
+    "2.5-3.0 m": {
+      "beams": 13,
+      "mean_return_rate": 0.378
+    },
+    "3.0-3.5 m": {
+      "beams": 17,
+      "mean_return_rate": 0.669
+    },
+    "3.5-4.0 m": {
+      "beams": 33,
+      "mean_return_rate": 0.744
+    },
+    "4.0-4.5 m": {
+      "beams": 23,
+      "mean_return_rate": 0.218
+    }
+  },
+  "farthest_beam": {
+    "i": 104,
+    "deg": 104.0,
+    "return_rate": 0.008333333333333333,
+    "median": 4.199,
+    "max": 4.199,
+    "std": null
+  },
+  "beams_never_returning": 155,
+  "beams_always_returning": 113,
+  "beams_intermittent": 92,
+  "reliable_returns_beyond_range_max": {
+    "n_beams": 23,
+    "beams": [
+      {
+        "i": 287,
+        "deg": 287.0,
+        "return_rate": 1.0,
+        "median": 4.087,
+        "max": 4.178,
+        "std": 0.0358
+      },
+      {
+        "i": 181,
+        "deg": 181.0,
+        "return_rate": 1.0,
+        "median": 4.086,
+        "max": 4.153,
+        "std": 0.0224
+      },
+      {
+        "i": 171,
+        "deg": 171.0,
+        "return_rate": 1.0,
+        "median": 3.956,
+        "max": 4.186,
+        "std": 0.0639
+      },
+      {
+        "i": 169,
+        "deg": 169.0,
+        "return_rate": 1.0,
+        "median": 3.931,
+        "max": 4.196,
+        "std": 0.0688
+      },
+      {
+        "i": 172,
+        "deg": 172.0,
+        "return_rate": 1.0,
+        "median": 3.921,
+        "max": 4.139,
+        "std": 0.0519
+      },
+      {
+        "i": 295,
+        "deg": 295.0,
+        "return_rate": 1.0,
+        "median": 3.919,
+        "max": 4.051,
+        "std": 0.0376
+      },
+      {
+        "i": 294,
+        "deg": 294.0,
+        "return_rate": 1.0,
+        "median": 3.887,
+        "max": 3.997,
+        "std": 0.0341
+      },
+      {
+        "i": 173,
+        "deg": 173.0,
+        "return_rate": 1.0,
+        "median": 3.87,
+        "max": 4.034,
+        "std": 0.0591
+      },
+      {
+        "i": 158,
+        "deg": 158.0,
+        "return_rate": 1.0,
+        "median": 3.868,
+        "max": 3.987,
+        "std": 0.0317
+      },
+      {
+        "i": 159,
+        "deg": 159.0,
+        "return_rate": 1.0,
+        "median": 3.846,
+        "max": 3.953,
+        "std": 0.034
+      },
+      {
+        "i": 293,
+        "deg": 293.0,
+        "return_rate": 1.0,
+        "median": 3.843,
+        "max": 3.934,
+        "std": 0.0294
+      },
+      {
+        "i": 160,
+        "deg": 160.0,
+        "return_rate": 1.0,
+        "median": 3.82,
+        "max": 3.913,
+        "std": 0.0359
+      }
+    ],
+    "why_it_matters": "A surface past the advertised 3.5 m that returns on EVERY scan is not a tail artefact. Both simulators report no-return there."
+  },
+  "open_sectors_no_return_deg": [
+    [
+      110,
+      129
+    ],
+    [
+      250,
+      269
+    ]
+  ],
+  "caveat": "The 4.2 m ceiling is where returns stop in THIS room; it is not proven to be the sensor limit. Nothing was seen between 4.2 and 5 m, but nothing is known to be there either. What IS established without geometry assumptions: the sensor returns reliably past its advertised range_max.",
+  "reaches": {
+    "amcl": "yes -- nav2_params.yaml laser_max_range: 100.0, so nothing is clamped before the likelihood field",
+    "costmaps": "no -- obstacle_max_range 2.5 / raytrace_max_range 3.0 discard everything past 3.0 m anyway"
+  }
+}

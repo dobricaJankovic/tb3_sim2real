@@ -544,12 +544,77 @@ Fill the tables in `docs/experiment.md`. Interpret a specific finding in a
 dated `.md` in `measurements/`, as `isaac_angular_deficit.md` and `nav2.md` do.
 Append to `docs/history.md`.
 
-One standing warning from this repository's own history: **three times now, a
+One standing warning from this repository's own history: **four times now, a
 mean has impersonated a constant here.** "Under-rotates by 30%" was the mean of
-a chattering wheel; "rotated by half a beam" was the mean of a coin flip. Both
-times the giveaway was a correction that did not close the residual. When an
-instrument averages, keep a path back to the unaveraged samples — the other
-reason A2 matters.
+a chattering wheel; "rotated by half a beam" was the mean of a coin flip; and
+"0.8% of returns exceed range_max" was 19.4% read in a corner. Twice the
+giveaway was a correction that did not close the residual; the third time it was
+measuring again somewhere else. When an instrument averages, keep a path back to
+the unaveraged samples — the other reason A2 matters.
+
+## B12. The real lidar's range exceeds both simulators' — decide before experiment 2
+
+**Measured 2026-09-19**, stationary, 120 scans, robot in a cluttered room with
+roughly 5 m of open space on one side.
+`measurements/2026-09-19_real_max_range.json`.
+
+| | advertised `range_max` | furthest return observed | returns past 3.5 m |
+|---|---|---|---|
+| gazebo | 3.5 | 3.5 (hard cut) | none, by construction |
+| isaacsim | 3.5 | 3.5 (`farRangeM: 3.5`) | none, by construction |
+| **real LDS-01** | **3.5** | **4.20 m** | **3518 of 18172 finite returns — 19.4%** |
+
+The first read of this found 0.8% and called it a tail artefact. It is not:
+
+- **23 beams returned a range beyond 3.5 m on all 120 scans.** The farthest
+  reliable one sits at **4.087 m with a standard deviation of 0.036 m** — a
+  stable surface, seen every single revolution, that **both simulators would
+  report as no-return**.
+- The two 20°-wide sectors with genuinely open space (110–129°, 250–269°)
+  returned **nothing at all**, which is the control: the far returns are
+  surfaces, not noise.
+
+**What is NOT established:** that 4.2 m is the sensor's ceiling. Nothing came
+back between 4.2 and 5 m — and nothing is known to be there. Separating "the
+sensor stops" from "the room stops" needs a wall at a measured distance, which
+is B6's room. The claim that survives without any geometry assumption is the one
+that matters: **the sensor returns reliably past its advertised `range_max`, and
+the datasheet figure both simulators use is wrong for this unit.**
+
+### Where it lands, and where it does not
+
+| consumer | limit | does the extra range reach it? |
+|---|---|---|
+| AMCL | `laser_max_range: 100.0` | **yes** — nothing is clamped before the likelihood field |
+| costmaps | `obstacle_max_range: 2.5`, `raytrace_max_range: 3.0` | **no** — everything past 3.0 m is discarded anyway |
+
+So this is a **localisation** difference, not a planning one, and it cuts the
+right way to matter: the real robot gives AMCL roughly 40% more usable range
+than either simulator does, in a room the same size. That is a candidate
+explanation for any localisation divergence experiment 2 finds, and it must be
+settled *before* that result is interpreted rather than after.
+
+### The decision
+
+Raising `farRangeM` / `<max>` to a measured value is **parameterising a model
+from ground truth**, the same move as the 240 Hz physics rate, and is allowed by
+`docs/experiment.md`'s rule. Tuning one simulator to match the *other* is not,
+and is not what this would be. Two things to settle first:
+
+1. **Which number.** 4.2 m is this room's furthest surface, not a measured
+   sensor limit. B6 gives a wall at a known distance; measure the drop-off
+   against it and use that.
+2. **Whether the reflectance model can carry it.** Isaac's profile has
+   `minReflectance: 0.1` and `minReflectanceRange: 3.5` — the range at which
+   that minimum reflectance is still detected. Raising `farRangeM` alone leaves
+   that pair inconsistent, and the Isaac lidar is `turtlebot3_isaacsim`'s, not
+   this repository's. Gazebo has no reflectance model at all, so its `<max>` is
+   a clean cut either way — which is itself a difference in *kind* between the
+   two simulators, not just in the number.
+
+Until then, **nothing is changed**, and one consequence is already live: an
+analysis script written against the bags must not assume `r <= range_max`. A
+histogram binned to `range_max` silently drops a fifth of the real returns.
 
 ---
 
@@ -594,18 +659,11 @@ all three, and on the real robot a `0.0` carries no information about whether
 the beam saw nothing or the driver dropped it. 84 of 360 beams flickered between
 `0.0` and a finite range over 40 stationary scans; 169 were `0.0` throughout.
 
-### The real driver returns ranges beyond its own `range_max` — **no action**
+### The real lidar sees a metre further than either simulator — **open decision, moved out of this section**
 
-Measured 2026-09-19: 113 of 14400 beams (**0.8%**) came back between 3.512 m and
-**4.191 m** while `/scan` advertised `range_max: 3.5`. Neither simulator does
-this; both cut cleanly at 3.5.
-
-Nav2 is unaffected — AMCL clamps to `range_max` and the costmap range-filters
-before the obstacle layer sees a reading — so nothing is being changed. The
-consequence, same shape as the angle one above: **an analysis script written
-against the bags must not assume `r <= range_max`.** A histogram binned to
-`range_max` silently drops these, and a naive "fraction of beams that returned"
-disagrees with one that filters.
+First measured as a 0.8% tail and written off. **Re-measured against ~5 m of
+open space the same day, it is not a tail**, and it is the largest
+sim-to-real gap in the perception row so far. It now has its own item: **B12**.
 
 ### Gazebo's lidar sits 1 mm low — **closed**
 

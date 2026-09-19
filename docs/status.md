@@ -301,16 +301,23 @@ means something.
    range), and it makes "saw nothing" and "dropped the beam" the same value:
    over 40 stationary scans, 169 of 360 beams were `0.0` throughout and **84
    flickered**.
-2. **0.8% of returns exceed its own `range_max`** — 113 of 14400 beams, out to
-   **4.191 m** against an advertised 3.5. Both simulators cut cleanly at 3.5.
+2. **It sees a metre further than either simulator.** First read as a 0.8% tail
+   and written off; re-measured the same day against ~5 m of open space,
+   **19.4% of all finite returns exceed the advertised 3.5 m**, out to
+   **4.20 m**, and **23 beams returned past 3.5 m on all 120 scans** — the
+   farthest stable one at **4.087 m, σ 0.036 m**. Both simulators report
+   no-return there, by construction. It reaches AMCL (`laser_max_range: 100.0`)
+   and not the costmaps (`obstacle_max_range: 2.5`), so it is a localisation
+   difference. **Open decision, `docs/experiment-plan.md` B12** — settle it
+   before experiment 2's localisation numbers are interpreted.
 3. **`angle_min = 0.0`, `angle_increment = 0.0174533` (exactly 1°).** It starts
    at the front like Gazebo and steps by exactly a degree like Isaac; Gazebo's
    increment is 0.23% wide (upstream writes `<max_angle>6.28</max_angle>`). So
    **neither simulator matches the robot's scan convention exactly**, and each
    differs in a different field.
 
-None of the three is being fixed — reasons and the consequence for any analysis
-script are in `docs/experiment-plan.md`, "Deliberately not being fixed".
+Items 1 and 3 are not being fixed — reasons in `docs/experiment-plan.md`,
+"Deliberately not being fixed". Item 2 is an open decision, not a closed one.
 
 **Clock sync (B1) is still not done and is unaffected by any of this.** The Pi
 has no chrony, no RTC, and syncs to `10.118.16.1` while the workstation syncs to
