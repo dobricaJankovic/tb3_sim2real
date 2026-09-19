@@ -237,6 +237,39 @@ are per-plugin. `scan_test` now reports `scan_rate_hz` and `wall_rate_hz` side
 by side in every run, so this confound cannot come back — and on hardware the
 same field is the real robot's own clock, which pairs with B2.
 
+### Experiment 1 has its Gazebo half — 2026-09-19
+
+22 official runs in `measurements/experiment1/`, the first data in that
+directory. Results and what they say: `docs/experiment.md`. Conditions,
+including the two things that went wrong on the way:
+`measurements/experiment1/notes.md`.
+
+Three sequences were added to `drive_test` for it, because `sweep` ends at a
+pose no single measurement describes — fine against a continuous ground-truth
+topic, useless against a tape measure. `line`, `spin_cw/ccw` and
+`square_cw/ccw` (UMBmark) each end somewhere one number describes, and
+`drive_test` now reports that same number itself as `net`, resolved into the
+run's own start frame. `hand` takes it from parameters on hardware.
+
+**Gazebo is extremely repeatable**: `line` agrees to 0.0000 m over three
+repeats, `spin` yaw to 0.06°, UMBmark return offset to 3–11 mm. Three repeats
+is generous for this backend and sizes nothing for the other two.
+
+**One unexplained result, and it matters for the hardware runs.** `square_ccw`
+overshoots heading by 5.2° against `square_cw`'s 1.3° and returns ~4× further
+off — while `spin_cw` and `spin_ccw` agree to 0.05°. Pure rotation is
+symmetric; the asymmetry appears only when translation and rotation combine,
+and is stable across repeats. Separating direction-asymmetric error is what
+UMBmark is for, so this has to be understood before the real squares are run.
+
+**Isaac Sim produced no runs.** `Node()` construction blocks forever while Isaac
+is playing; killing Isaac releases it, and so does disabling FastDDS's
+shared-memory transport. `/dev/shm` is not under pressure (2% used), so it is
+not stale-segment exhaustion. The UDP-only workaround exists in git history
+(removed 2026-09-13, `docs/troubleshooting.md`) and was deliberately not applied
+— half a matrix on an undeclared transport is a confound, and whether to move
+both backends to UDP is a decision, not a fix.
+
 ### Gazebo's missing slip was one disowned number — 2026-09-19
 
 `turtlebot3_gazebo`'s `model.sdf` sets both tyres to `mu = 100000` under its own

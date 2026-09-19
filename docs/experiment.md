@@ -73,11 +73,53 @@ Backends: `gazebo`, `isaacsim` (`real` when hardware is available — see
 `turtlebot3_world`, `small_office` (`scripts/save_map.py <world>` makes one for
 any other).
 
-### Actuation — `drive_test`
+### Actuation — experiment 1, open space open loop
 
-| backend | world | date | dt / solver iters | vx sweep | wz sweep | before/after gain fix | file |
-|---|---|---|---|---|---|---|---|
-| | | | | | | | |
+`measurements/experiment1/`, and its README for how to read a file. Every number
+below is `net` — the whole run reduced to the three scalars a tape measure
+gives, resolved into the pose the run started from. On the simulators `net`
+comes from `/ground_truth/odom`; on hardware it will come from a person, in
+`hand`, and the pair is the wheel → body layer.
+
+**gazebo, 2026-09-19**, `empty_stage`, `physics.floor.mu = 1.0`, RTF ≈ 1.0.
+Mean ± standard deviation across repeats:
+
+| sequence | n | forward m | lateral m | yaw ° | nominal yaw ° |
+|---|---|---|---|---|---|
+| `line` | 3 | **+3.0039** ± 0.0000 | +0.0017 ± 0.0029 | +0.04 ± 0.08 | 0 |
+| `spin_cw` | 3 | −0.0016 ± 0.0001 | −0.0001 ± 0.0004 | **−721.87** ± 0.06 | −720 |
+| `spin_ccw` | 3 | −0.0024 ± 0.0001 | +0.0009 ± 0.0006 | **+721.75** ± 0.07 | +720 |
+| `square_cw` | 5 | **+0.0251** ± 0.0037 | **+0.0179** ± 0.0030 | −361.29 ± 0.16 | −360 |
+| `square_ccw` | 5 | **+0.0948** ± 0.0087 | **−0.0935** ± 0.0107 | +365.23 ± 0.48 | +360 |
+
+`sweep` is run 3× as well and is not summarised here: it ends at a pose no
+single measurement describes, which is the whole reason the other four exist.
+Its value is the per-phase command → wheel comparison inside each file.
+
+**isaacsim: not yet run.** It deadlocks FastDDS participant creation — `Node()`
+construction blocks forever while Isaac is playing, and disabling the
+shared-memory transport releases it. The UDP-only workaround was deliberately
+not applied, because recording half of one matrix on a different transport from
+the other half, undeclared, is the kind of confound this document exists to
+prevent. `docs/troubleshooting.md` has the failure class; the decision is
+whether to run both backends on UDP and say so.
+
+**real: not yet run.** Needs the marked floor, the taped square and the
+reference point (`docs/experiment-plan.md` B4).
+
+#### What the Gazebo numbers say on their own
+
+- **`line` overshoots by +3.9 mm on 3 m, with zero scatter** — a +0.13% scale
+  error, identical to five decimal places across three repeats.
+- **Pure rotation is symmetric**: `spin_cw` and `spin_ccw` overshoot by 1.87°
+  and 1.75° over two full turns, agreeing with each other to **0.05°**.
+- **The square is not symmetric.** `square_ccw` overshoots heading by 5.2°
+  against `square_cw`'s 1.3°, and returns about **4× further** from the start
+  mark. Since pure rotation is even-handed, the asymmetry appears only when
+  translation and rotation are combined, and it is stable across r1–r5 rather
+  than drifting. **Unexplained.** UMBmark exists to separate direction-
+  asymmetric error, so this has to be understood before the hardware squares —
+  otherwise the real robot's asymmetry cannot be told from the apparatus's.
 
 ### Perception — static scan vs. analytic
 
@@ -101,9 +143,19 @@ any `nav_test` delta as real rather than noise, the number of repeats needed is
 `docs/worknotes/2026-09-16-overnight-brief.md` §2 A6 for the derivation once
 the repeat-run data exists.
 
-| metric | Isaac stddev (n repeats) | derived n for `nav_test` | source |
-|---|---|---|---|
-| | | | |
+| metric | stddev (n repeats) | source |
+|---|---|---|
+| gazebo `line` forward | **0.0000 m** (3) | `measurements/experiment1/` |
+| gazebo `spin` yaw | 0.06° (3 each way) | " |
+| gazebo `square` return offset | 3–11 mm (5 each way) | " |
+| isaacsim | not yet measured | blocked, above |
+| real | not yet measured | needs the room |
+
+**Gazebo's scatter is far below the systematic offsets being measured**, so
+3 repeats is already generous for it — a fourth would change no conclusion. That
+is expected and it sizes nothing: Gazebo is the deterministic backend. The
+number that decides how many repeats experiment 2 needs is Isaac's and the real
+robot's, and neither exists yet.
 
 ## Where the numbers live
 
