@@ -363,10 +363,12 @@ comparison alone would have raised a false alarm here.
 rotation — the wanted figure exactly, so no tape measure was needed and Isaac
 Sim's asset agrees with the hardware.
 
-## B4. Experiment 1 — open space, open loop — **gazebo done 2026-09-19**
+## B4. Experiment 1 — open space, open loop — **gazebo + isaacsim done, real partial by decision**
 
-*Status: `gazebo` complete, 22 runs in `measurements/experiment1/`. `isaacsim`
-blocked on a FastDDS participant-creation deadlock. `real` waits on the room.
+*Status: `gazebo` complete 2026-09-19 and `isaacsim` complete 2026-09-20, 22
+runs each in `measurements/experiment1/`. The isaacsim blocker was stale Fast
+DDS segments, not the shared-memory transport, so both backends ran on the same
+transport and no UDP decision was needed. `real` is deliberately partial.
 Results in `docs/experiment.md`, conditions in that directory's `notes.md`.
 The sequences below are superseded by the four in
 `measurements/experiment1/README.md`: `sweep` alone ends at a pose no tape can

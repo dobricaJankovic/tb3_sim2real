@@ -4,8 +4,9 @@
 
 - **Date:** 2026-09-19
 - **Backends attempted:** `gazebo`, `isaacsim`
-- **Backends completed:** `gazebo` only. **`isaacsim` produced no runs** — see
-  *What went wrong* below.
+- **Backends completed:** `gazebo` only **in this session**. `isaacsim`
+  produced no runs here and was completed on 2026-09-20 — its own section is at
+  the end of this file, and it also corrects the cause diagnosed below.
 - **World:** `empty_stage`, `headless:=true`, `rviz:=false`, no Nav2, no SLAM.
 - **Runner:** `scripts/run_experiment1.sh <backend> 2026-09-19`, executed inside
   the `tb3_ros` container. The simulator is launched once and all repeats run
@@ -241,3 +242,123 @@ magnitude, reported without interpretation.
 session, only used consistently by the same person — should be stated
 precisely (e.g. "point on the floor under the wheel axle midpoint") before any
 further hand-measured run, real or otherwise.
+
+---
+
+## Isaac Sim backend, 2026-09-20 — the matrix is complete
+
+**All 22 runs recorded, every one `net.source = /ground_truth/odom`.** With
+`gazebo` (2026-09-19) that is two of the three backends complete; `real` stays
+deliberately partial by the decision recorded above.
+
+### Conditions
+
+- **World:** `empty_stage`, `headless:=true`, `rviz:=false`, no Nav2, no SLAM.
+- **Physics rate: 240.0 Hz** — `isaacsim.launch.py`'s `physics_hz` default at
+  this commit, not overridden on the command line. (The first attempt's Kit
+  log echoed `--physics-hz 240.0` in its argument list; this run's log does
+  not print the line, so the rate is established from the launch default
+  rather than observed at runtime.)
+- **`turtlebot3_isaacsim` commit:** `4231fbf`, the pin from A0.
+- **DDS transport: shared memory**, unchanged, same as the Gazebo half. See
+  below — no UDP-only profile was needed or applied.
+- **`physics.floor.mu`:** `empty_stage` declares no `physics:` block, so
+  `FLOOR_MU` = 1.0 as for Gazebo. Isaac reads friction from its own material
+  definitions, not from this; recorded for symmetry with the Gazebo entry.
+- **Floor, battery, reference point:** not applicable, simulated runs.
+- **Real-time factor: not observed.** Neither backend's tooling prints one and
+  no separate `/clock` measurement was taken this session.
+
+### Two launches, not one, and which runs came from which
+
+`sweep` ×3, `line` ×3, `spin_cw` ×3 and `spin_ccw` ×3 ran against one Isaac
+launch; `square_cw` ×5 and `square_ccw` ×5 against a second, about four hours
+later. The Gazebo matrix was one launch throughout.
+
+This does not enter any result — every number is a delta over its own run,
+resolved into that run's start pose — but it is a condition, so it is written
+down. **The split falls between whole sequences, never inside one**: three
+`square_cw` runs from the first launch were **deleted and re-run**, because a
+sequence's repeats are what its standard deviation is computed over, and for
+the UMBmark squares the CW/CCW comparison is the entire point. A launch
+boundary inside one of those numbers would be a caveat no reader could undo;
+re-running five squares cost eighteen minutes.
+
+`run_experiment1.sh` now takes an optional third argument overriding the
+matrix, which is what made the resume possible:
+
+    ./scripts/run_experiment1.sh isaacsim 2026-09-20 "square_cw:5 square_ccw:5"
+
+### What went wrong
+
+**1. The 2026-09-19 diagnosis was wrong, and it was the expensive kind of
+wrong.** Recorded above: "the blocker is FastDDS's shared-memory transport, not
+stale segments", with `/dev/shm` at 2% used offered as the evidence. The real
+cause is stale segments — a participant that dies without closing can leave a
+*named mutex held*, and the next participant that hashes onto that port blocks
+forever before rclcpp emits its first log line. Free space was never the
+mechanism, so "2% used" exonerated nothing. `scripts/dds_clean.sh --kill`
+cleared 42 objects and `drive_test` created its node instantly with Isaac
+playing and SHM on.
+
+The observation that killing Isaac released the block, which is what pointed at
+the transport, fits the segment explanation too: fewer live participants means a
+different port hash. **A workaround that works is not a diagnosis** — the
+UDP-only profile did unblock it, and had it been applied, half of experiment 1
+would have been recorded on a transport the other half never used.
+
+**2. A bug in the shared instrument, which aborted the first attempt at
+`sweep` r3.** `_net()` decided whether the run had ground truth by testing
+`'gx' in self.samples[0]` — the *first* sample only. `/odom` and
+`/ground_truth/odom` are separate subscriptions and `wait_for_odom()` waits for
+the first of them, so when truth arrived a beat later the whole run silently
+fell back to `/odom (NOT truth)` despite every phase carrying a `truth_d`. On
+r3 exactly **20 samples of 11875** — about 0.4 s, inside `settle_pre`, robot
+stationary — lacked it.
+
+Fixed to select over the truth-bearing samples, which is how `_summarise()`
+already decided the same question per phase. Recomputed from the discarded
+run's own samples the fix gives `fwd −1.599 / lat +1.558 / yaw +855.3°`,
+in line with r1 and r2, so no data was ever missing. **This would have hit
+Gazebo identically**; it did not only because the P3D plugin happened to
+publish before the first sample every time. The runner's
+`assert net.source == '/ground_truth/odom'` is what caught it — it stopped the
+matrix rather than writing 22 files whose provenance was wrong.
+
+**3. The runner leaked Isaac Sim.** Its EXIT trap killed `ros2 launch`, but Kit
+is not a child that dies with it, and a stage was left playing with nobody
+driving it. The trap now kills `turtlebot3_isaacsim.py` as well, TERM then
+KILL. Note it still leaves `robot_state_publisher` and the two bridge nodes
+behind; those were killed by PID afterwards.
+
+**4. `docker compose up -d` emptied the workspace mid-session.** `/ws/install`
+is in the container's writable layer, not a volume (`docs/setup.md` says so),
+so recreating the container left `/ws/src` and nothing else, and the resumed
+runner died instantly on `source /ws/install/setup.bash: No such file or
+directory`. `colcon build --symlink-install` restored it in 2.4 s. The same
+recreation also hit the `/tmp/tb3_sim2real.docker.xauth` trap that
+`docker/x11-auth.sh` documents: the host `/tmp` had been cleared, and Docker
+creates a missing bind-mount source as a root-owned **directory**.
+
+**5. `pkill -f <pattern>` kills the shell running it** when the pattern appears
+in that shell's own command line — exit 143, silently, before the rest of the
+line runs. It looked like Isaac had ignored the kill. `dds_clean.sh` documents
+this exact trap and matches on executable paths for the reason; the ad-hoc
+cleanup commands here did not.
+
+### Anything that looks off
+
+Reported without interpretation:
+
+- **`line` lateral scatter is ±52 mm and yaw scatter ±1.65°** over three
+  repeats, against Gazebo's ±3 mm and ±0.08°. Forward distance is tight
+  (±2.9 mm).
+- **`spin` is 10.3% short of the commanded rotation in both directions**, and
+  the two directions agree with each other to 0.2°.
+- **Neither square closes**: 1.14 m (CW) and 1.26 m (CCW) from the start mark.
+- **`sweep` wheel tracking is worst at the lowest commanded rotation rate**
+  (69–83% at `wz = 0.2`) and best at the highest (97–99% at `wz = 1.5`) — the
+  opposite of what a velocity ceiling would produce. The wheel joints carry no
+  `maxJointVelocity`, no `maxForce` and no limits in
+  `payloads/Physics/physics.usda`. The full three-backend table is in
+  `docs/experiment.md`.

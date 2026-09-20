@@ -262,13 +262,19 @@ symmetric; the asymmetry appears only when translation and rotation combine,
 and is stable across repeats. Separating direction-asymmetric error is what
 UMBmark is for, so this has to be understood before the real squares are run.
 
-**Isaac Sim produced no runs.** `Node()` construction blocks forever while Isaac
-is playing; killing Isaac releases it, and so does disabling FastDDS's
-shared-memory transport. `/dev/shm` is not under pressure (2% used), so it is
-not stale-segment exhaustion. The UDP-only workaround exists in git history
-(removed 2026-09-13, `docs/troubleshooting.md`) and was deliberately not applied
-— half a matrix on an undeclared transport is a confound, and whether to move
-both backends to UDP is a decision, not a fix.
+**Isaac Sim produced no runs on 2026-09-19. It is complete as of 2026-09-20 —
+22 runs, all on ground truth, on the same shared-memory transport as Gazebo.**
+The 2026-09-19 diagnosis quoted here — participant creation blocks while Isaac
+plays, `/dev/shm` only 2% used, therefore "not stale-segment exhaustion,
+therefore the transport" — **was wrong**. Stale segments do not have to exhaust
+anything: one that outlives its participant can hold a *named mutex*, and the
+next participant hashing onto that port blocks before rclcpp logs a line.
+`scripts/dds_clean.sh --kill` cleared 42 objects and node construction went
+from "forever" to instant with Isaac playing and SHM on. Killing Isaac
+appeared to release it for the same reason — fewer participants, different port
+hash. No UDP-only profile was needed, so the confound that gated this decision
+never materialised. Numbers in `docs/experiment.md`; conditions and the rest of
+the session in `measurements/experiment1/notes.md`.
 
 ### Gazebo's missing slip was one disowned number — 2026-09-19
 

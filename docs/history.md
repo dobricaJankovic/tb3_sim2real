@@ -2489,3 +2489,117 @@ docs/network.md, robot topics listed and local nodes missing.
 and the GPU explanation in `bringup.launch.py` was never demonstrated. Retest
 `rviz:=true` on a cleared `/dev/shm` before trusting the `rviz` default of
 false as a real finding.
+
+## 2026-09-20 — experiment 1's Isaac Sim half, and a workaround that was not a diagnosis
+
+**Done:** all 22 experiment-1 runs on `isaacsim`, `empty_stage`, 240 Hz,
+`turtlebot3_isaacsim` @ `4231fbf`, every one on `/ground_truth/odom`. Two of
+three backends are now complete; `real` stays partial by the 2026-09-19
+decision. Numbers in `docs/experiment.md`, conditions in
+`measurements/experiment1/notes.md`.
+
+### The 2026-09-19 blocker was stale DDS segments, and the wrong answer was expensive
+
+Recorded on 2026-09-19: "the blocker is FastDDS's shared-memory transport, not
+stale segments", reasoned from `/dev/shm` being only 2% used. That inference
+does not hold — **a stale segment does not have to exhaust anything to break
+you**. It can hold a *named mutex* after its participant dies, and the next
+participant that hashes onto that port blocks forever, before rclcpp emits its
+first log line. Free space is irrelevant to that mechanism, so "2% used"
+exonerated nothing.
+
+`scripts/dds_clean.sh --kill` (written 2026-09-20 for the `nav:=true` hang,
+commit `6fa9b19`) cleared 42 objects and took `drive_test`'s `Node()`
+construction from "blocks forever with Isaac playing" to instant, SHM still on.
+The observation that had pointed at the transport — killing Isaac released the
+block — fits the segment story equally: fewer live participants, different port
+hash.
+
+**The general lesson, which is why this is written down.** The UDP-only profile
+*did* unblock it, and it was nearly adopted. A workaround that works is not a
+diagnosis, and this one would have recorded half of experiment 1 on a transport
+the other half never used, to fix a problem that was not the transport. The
+2026-09-19 decision to refuse the confound is what bought the time to find the
+real cause.
+
+### `_net()` threw away ground truth over one message
+
+The first attempt aborted at `sweep` r3 on the runner's own
+`assert net.source == '/ground_truth/odom'`. `drive_test._net()` decided
+whether a run had ground truth from `'gx' in self.samples[0]` — the first
+sample alone. `/odom` and `/ground_truth/odom` are separate subscriptions and
+`wait_for_odom()` waits for the first, so truth arriving a beat later made the
+**entire run** report `/odom (NOT truth)` while every phase carried a `truth_d`.
+On r3 it was 20 samples of 11875, about 0.4 s, inside `settle_pre` with the
+robot stationary.
+
+Now selected over the truth-bearing samples — which is how `_summarise()`
+already answered the same question per phase, so the fix made two halves of one
+file agree with each other. Recomputed from the discarded run's samples it
+gives `fwd −1.599 / lat +1.558 / yaw +855.3°`, in line with r1 and r2: the data
+was always there. **It would have hit Gazebo identically** and did not only
+because P3D happened to publish before the first sample every time.
+
+Worth keeping: the assert is what caught this. Without it the matrix would have
+completed and written 22 files whose stated provenance was wrong.
+
+### Isaac loses rotation at the wheel; Gazebo loses it to slip
+
+The headline result. Isaac turns **10.3% short** in both directions
+(−645.70° / +645.49° against ±720°, symmetric to 0.2°) where Gazebo overshoots
+by 0.26%, and neither square closes — 1.14 m and 1.26 m from the start mark
+against Gazebo's 31 mm and 133 mm.
+
+`sweep` says where it goes, and the two simulators fail at opposite ends:
+
+- **Gazebo's wheels hit the commanded rate exactly at every rate** and it loses
+  everything between wheel and ground, −3% at `wz = 0.2` growing to **−17% at
+  `wz = 1.5`**. Friction-limited slip, as `mu = 1.0` predicts.
+- **Isaac's wheels never reach the command**, worst *slowly* (69–83% at
+  `wz = 0.2`, 97–99% at `wz = 1.5`), and its body then tracks them to 1–3%.
+  Contact-solve chatter at the wheel, not slip.
+- **Not a velocity ceiling**, which was the first hypothesis. The wheel joints
+  in `payloads/Physics/physics.usda` are velocity drives (`damping 1745.3292`,
+  `stiffness 0`, type `force`) with no `maxJointVelocity`, no `maxForce` and no
+  limits authored; tracking *improves* with rate, the reverse of saturation;
+  and the fastest wheel rate in the experiment, 6.06 rad/s in `lin_0.20`,
+  tracks at 99.9% while the `spin` turns ask 1.21 rad/s and fall 10% short.
+- **The real robot is 95–97% flat across every rate** and matches neither.
+  Caveat: hardware `/odom` is encoder-integrated so it cannot show slip — it is
+  command → wheel only, against the simulators' command → body. For the layer
+  it can see, Isaac is *further* from the robot than Gazebo. Settling it needs
+  hardware `spin_*` with a tape, which is exactly what was skipped on
+  2026-09-19.
+
+### Smaller things, each of which cost time
+
+- **`run_experiment1.sh` leaked Kit.** The EXIT trap killed `ros2 launch`; Isaac
+  is not a child that dies with it and a stage kept playing. Trap now kills
+  `turtlebot3_isaacsim.py` too. It still leaves `robot_state_publisher` and the
+  bridge nodes.
+- **`pkill -f <pattern>` kills the shell running it**, because the pattern is in
+  that shell's own command line — exit 143 before the rest of the line runs, so
+  Isaac looked like it had survived a `kill -9`. `dds_clean.sh` documents this
+  and matches on executable paths; the ad-hoc commands did not.
+- **`docker compose up -d` emptied `/ws/install`** (writable layer, not a
+  volume) and the resumed runner died on `source /ws/install/setup.bash: No
+  such file or directory` — which is what "no ROS topics" actually was, since
+  nothing had started. `colcon build --symlink-install`, 2.4 s. The same
+  recreation hit the `x11-auth.sh` trap: host `/tmp` had been cleared, and
+  Docker creates a missing bind-mount source as a root-owned directory.
+- **The matrix ran from two launches**, `sweep`/`line`/`spin_*` from one and the
+  squares from another four hours later. Deltas, so no result moves — but the
+  split is between whole *sequences*, never inside one: three `square_cw` runs
+  from the first launch were deleted and re-run, because a sequence's repeats
+  are what its standard deviation is over. `run_experiment1.sh` now takes an
+  optional third argument overriding the matrix, which is what made that
+  cheap.
+- **New: `scripts/summarize_experiment1.py`**, which reproduces the published
+  Gazebo table exactly and then produced the Isaac one. The tables had been
+  built by hand.
+
+### Left open
+
+`tb3_bringup`'s test suite is **6 failed, 9 passed** — the launch-mode tests
+still expect `rviz` to be included by default, which commit `fb4f739` changed.
+Pre-existing, unrelated to this session's edits, and not fixed here.

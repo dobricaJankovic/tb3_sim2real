@@ -96,13 +96,91 @@ Mean ± standard deviation across repeats:
 single measurement describes, which is the whole reason the other four exist.
 Its value is the per-phase command → wheel comparison inside each file.
 
-**isaacsim: not yet run.** It deadlocks FastDDS participant creation — `Node()`
-construction blocks forever while Isaac is playing, and disabling the
-shared-memory transport releases it. The UDP-only workaround was deliberately
-not applied, because recording half of one matrix on a different transport from
-the other half, undeclared, is the kind of confound this document exists to
-prevent. `docs/troubleshooting.md` has the failure class; the decision is
-whether to run both backends on UDP and say so.
+**isaacsim, 2026-09-20**, `empty_stage`, `physics_hz = 240.0`,
+`turtlebot3_isaacsim` @ `4231fbf`, shared-memory DDS — the **same transport as
+the Gazebo half**, so the confound that blocked this run on 2026-09-19 does not
+exist. 22 runs, all `net.source = /ground_truth/odom`:
+
+| sequence | n | forward m | lateral m | yaw ° | nominal yaw ° |
+|---|---|---|---|---|---|
+| `line` | 3 | **+2.9952** ± 0.0029 | −0.0264 ± 0.0522 | −0.95 ± 1.65 | 0 |
+| `spin_cw` | 3 | −0.0004 ± 0.0022 | −0.0024 ± 0.0019 | **−645.70** ± 1.28 | −720 |
+| `spin_ccw` | 3 | +0.0031 ± 0.0024 | −0.0004 ± 0.0043 | **+645.49** ± 0.25 | +720 |
+| `square_cw` | 5 | **−0.5628** ± 0.0204 | **−0.9937** ± 0.0549 | −318.17 ± 1.29 | −360 |
+| `square_ccw` | 5 | **−0.5551** ± 0.0235 | **+1.1292** ± 0.0395 | +313.88 ± 0.61 | +360 |
+
+The 2026-09-19 diagnosis — "it deadlocks FastDDS participant creation and
+disabling the shared-memory transport releases it" — **was wrong about the
+cause**, and the wrong cause was about to buy an undeclared transport change.
+It is stale `/dev/shm` segments holding named mutexes, the failure class found
+on 2026-09-20 and written up in `scripts/dds_clean.sh`. Clearing them took
+`Node()` construction from "blocks forever" to instant with Isaac playing and
+SHM on. Free space was never the mechanism, which is why "`/dev/shm` is only 2%
+used" looked like it exonerated the segments and did not.
+
+**The `sweep` runs are commanded differently from Gazebo's in one phase.** Top
+linear rate is 0.20 m/s here against the Gazebo files' 0.22 — the instrument
+was edited on 2026-09-19 for the real robot's stall at its own rated maximum.
+`line`, `spin_*` and `square_*` never use that phase and are directly
+comparable.
+
+#### What the Isaac numbers say, next to Gazebo's
+
+- **Rotation comes up ~10% short, symmetrically.** −645.70° and +645.49°
+  against ±720°, the two directions agreeing to 0.2°. Gazebo *overshoots* by
+  0.26%. This is the largest sim-to-sim difference in experiment 1.
+- **Translation is close**: +2.9952 m on 3.0, a −0.16% scale error against
+  Gazebo's +0.13% — but the lateral scatter is ±52 mm and the yaw scatter
+  ±1.65°, where Gazebo held ±3 mm and ±0.08°.
+- **The squares do not close.** Isaac ends **1.14 m** (CW) and **1.26 m** (CCW)
+  from the start mark; Gazebo ended 31 mm and 133 mm off. That is the rotation
+  deficit compounding over four corners, not a separate effect.
+- **Isaac has no counterpart to Gazebo's CW/CCW asymmetry.** Its two directions
+  mirror each other (−0.563/−0.994 against −0.555/+1.129); Gazebo's differ 4×.
+  Whatever produces Gazebo's asymmetry is Gazebo's, which is worth knowing
+  before the hardware squares.
+
+#### Where the deficit lives: Isaac loses it at the wheel, Gazebo to slip
+
+`sweep` separates the two layers, because it reports commanded wheel rate
+against `/joint_states` alongside ground-truth body motion. The two simulators
+fail in opposite places, and at opposite ends of the rate range:
+
+| commanded | Gazebo wheels | Gazebo body | Isaac wheels | Isaac body | real body |
+|---|---|---|---|---|---|
+| `wz = 0.2` | 100.0% | 96.9% | 69–83% | **77–82%** | 96.1% |
+| `wz = 0.5` | 100.0% | 94.7% | 87–100% | 89–90% | 96.0% |
+| `wz = 1.0` | 100.0% | 89.4% | 97–98% | 94.4% | 95.7% |
+| `wz = 1.5` | 100.0% | **82.9%** | 97–99% | 95.7% | 95.5% |
+| `v = 0.20` | 100.0% | 97.4%* | 99.8% | 98.0% | 95.4% |
+
+\* Gazebo's linear row is its `lin_0.22` phase; see the rate note above.
+
+- **Gazebo's wheels reach the commanded rate exactly, at every rate**, and it
+  loses everything between wheel and ground — −3% at `wz = 0.2` growing to
+  **−17% at `wz = 1.5`**. Friction-limited slip, which is what `mu = 1.0`
+  predicts and what the 2026-09-19 friction work put there deliberately.
+- **Isaac's wheels do not reach the commanded rate**, worst when turning
+  slowly, and its body then follows them to within 1–3%. The deficit is in the
+  contact solve at the wheel — the cylindrical-collider chatter CLAUDE.md
+  documents, whose *mean* falls below the command — not slip.
+- **It is not a velocity ceiling.** The wheel joints in
+  `payloads/Physics/physics.usda` are velocity drives (`damping = 1745.3292`,
+  `stiffness = 0`, `type = "force"`) with **no `maxJointVelocity`, no
+  `maxForce` and no joint limits authored**. Tracking gets *better* with rate,
+  the reverse of saturation, and the fastest wheel rate in the whole experiment
+  — 6.06 rad/s during `lin_0.20` — tracks at 99.9%, while the `spin`/`square`
+  turns ask for only 1.21 rad/s and come up ~10% short.
+- **Neither simulator has the real robot's shape.** Hardware tracks **95–97%
+  flat across every rate**; Isaac is 78–82% where the robot is 96%, Gazebo is
+  83% where the robot is 96%. They fail at opposite ends and the robot fails at
+  neither. **Caveat that limits how hard this can be pushed:** the real column
+  is `/odom`, integrated from the encoders, so it cannot show slip at all — it
+  is the command → wheel layer only, against the simulators' command → body.
+  For the layer hardware *can* see, Isaac at `wz = 0.5` (~90%) is further from
+  the robot (~96%) than Gazebo is (100% at the wheel). Settling which
+  simulator is right needs `spin_cw`/`spin_ccw` on hardware with a tape — the
+  runs deliberately skipped on 2026-09-19.
 
 **real: not yet run.** Needs the marked floor, the taped square and the
 reference point (`docs/experiment-plan.md` B4).
