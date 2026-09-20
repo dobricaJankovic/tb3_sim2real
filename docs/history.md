@@ -2231,6 +2231,97 @@ room.** Next is B1: chrony on the Pi, then the check that trusts neither
 daemon's self-report — `date +%s.%N` on both machines, right after the Pi boots,
 against the 157 ms measured on 2026-09-16.
 
+## 2026-09-19 — The robot is on: B1-B3, and two disowned numbers
+
+A hardware session that closed the blocking half of Section B and then found
+that two of the repository's headline comparisons rested on parameters nobody
+chose. Docs carry the detail; this is what happened and what to distrust.
+
+**B1, clock sync — done.** chrony on the Pi, tracking the workstation. The
+plan's own third check had to be retired: `date +%s.%N` over ssh has a floor of
+±rtt/2, about ±20 ms here, so it found the original 157 ms but could not confirm
+a fix — it read −28 ms before chrony and −20 ms after, the same noise twice.
+What replaced it is independent of chrony *and* measures the thing B1 protects:
+`/scan`'s `header.stamp` is written by the Pi and its receive time read on the
+workstation, and a one-way delay cannot be negative, so the minimum bounds the
+offset. 442 scans: min **+3.0 ms**, p99 +49, max +138, **zero negative**. The
+risk is now the Wi-Fi tail against `transform_tolerance`, not skew. Two traps:
+`chronyc tracking` is meaningless for its first ten minutes (skew 1000000 ppm
+while already tracking correctly), and **`systemctl is-active ufw` says
+`active` on both machines while ufw itself is `ENABLED=no`** — which is where
+the docs' "the firewall rule is mandatory" claim came from. No rule was needed.
+
+**B2/B3 — done, and the interface table was wrong.** `docs/architecture.md`
+named `ld08_driver` for the real `/scan`; the running node is
+`hls_lfcd_lds_driver` and `range_max` is 3.5, an LDS-01. B3 asked to compare
+`turtlebot3_description` *versions* — they differ (2.3.7 from source on the
+robot against apt's 2.3.6) and that check would have raised a false alarm. The
+file is byte-identical, md5 `51b1f951…`, which is what the one-URDF claim
+actually rests on. `base_footprint → base_scan` measures exactly
+`(-0.032, 0, 0.182)`.
+
+**The real lidar sees a metre further than either simulator.** First read in a
+corner as a 0.8% tail and written off; re-measured against ~5 m of open space,
+**19.4% of returns exceed the advertised 3.5 m, out to 4.20 m, and 23 beams
+returned past 3.5 m on all 120 scans** — the farthest stable one at 4.087 m,
+σ 36 mm. Both simulators cut cleanly at 3.5 by construction. The control is in
+the same scan: the two genuinely open sectors returned nothing. It reaches AMCL
+(`laser_max_range: 100.0`) and not the costmaps (`obstacle_max_range: 2.5`), so
+it is a localisation difference, and it is now B12 rather than a line in
+"deliberately not being fixed". **A corner impersonated a room** — the fourth
+time a measurement here has been generalised from too little.
+
+**Gazebo's missing slip was one number, and ROBOTIS disowned it in a comment.**
+`turtlebot3_gazebo`'s `model.sdf` sets both tyres to `mu = 100000` under
+`<!-- This friction pamareter don't contain reliable data!! -->`, and the
+generator `include`d Gazebo's stock ground plane at another undeclared
+`100/50`. Friction is `physics.floor.mu` in the manifest now — same argument as
+colour — written into the generated world and carried to the wheel through the
+temp-copy of the robot SDF that `with_ground_truth()` already established.
+Four conditions measured: pivot slip goes from −0.20% to **−15.66%** at
+`wz = 1.5`, straight-line unchanged. **At `wz = 0.5` Gazebo lands on −4.66%
+against Isaac's −4.61%** — an order-of-magnitude disagreement between two
+engines closing to 0.05 points. ODE combines a pair by the **minimum**,
+measured rather than assumed. `slip1`/`slip2` stay 0.0: they are
+force-dependent slip, not an on/off switch for slipping.
+
+The first attempt at that table got the rule backwards, because it ran through
+`bringup.launch.py`, which overrides `wheel_mu` with the manifest's floor — so
+"upstream" silently ran at 100 and "wheel only" was a duplicate of it. The tell
+was two rows agreeing to the digit. **1.0 is an assumption**, dry rubber on
+vinyl, the top of a ~0.6–1.0 band, and B10 replaces it with a fit to the real
+robot's pivot slip.
+
+**RViz showed no `/scan` for two stacked silent reasons.** The driver publishes
+`BEST_EFFORT` and RViz subscribes `RELIABLE`, which delivers nothing and says
+nothing; underneath, `tb3.rviz` is fixed to `map`, which does not exist in the
+bare `backend:=real` mode that `rviz.launch.py`'s own docstring says is for
+seeing whether the robot is alive. `rviz/tb3_robot.rviz` (fixed to `odom`) is
+now passed whenever neither `nav` nor `slam` is set.
+
+**Experiment 1 got its four paths.** `sweep` ends at a pose no tape can
+measure, so `line`, `spin_cw/ccw` and `square_cw/ccw` (UMBmark) were added, each
+ending somewhere one number describes, and `drive_test` reports that same number
+itself as `net` — resolved into the run's own start frame, because the two
+simulators' ground-truth origins differ and hardware has no world frame at all.
+`hand` takes it from parameters on the real robot, and the pair *is* the
+wheel → body layer.
+
+Gazebo's 22 runs are in. It is extremely repeatable — `line` to 0.0000 m over
+three repeats — **and the square is not symmetric**: `square_ccw` overshoots
+heading by 5.2° against `square_cw`'s 1.3° and returns ~4× further off, while
+`spin_cw` and `spin_ccw` agree to 0.05°. Pure rotation is even-handed; the
+asymmetry appears only when translation and rotation combine, and it is stable
+across repeats. **Unexplained**, and it matters: separating
+direction-asymmetric error is exactly what UMBmark is for, so an apparatus with
+its own cannot measure the robot's.
+
+Two runner bugs worth remembering, both from committing a script without
+executing it: an unquoted `}` inside `${1:?usage … {gazebo|isaacsim}}` ends the
+expansion early, so `BACKEND` was always `"gazebo}"` and no argument ever
+matched; and `set -u` aborts on colcon's `setup.bash`, which reads
+`COLCON_TRACE` unguarded.
+
 ## 2026-09-19 (later) — Experiment 1's real leg, deliberately left half-run
 
 `sweep` ×3 and `line` ×3 recorded for `backend:=real`, in the new

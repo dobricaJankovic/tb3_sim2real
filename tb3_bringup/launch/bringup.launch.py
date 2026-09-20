@@ -291,9 +291,6 @@ def generate_launch_description():
             'backend',
             description='Which robot to bring up: real | gazebo | isaacsim'),
         DeclareLaunchArgument(
-            # Required, deliberately: no default. See the module docstring and
-            # docs/architecture.md for why guessing either argument is worse
-            # than an error.
             'world',
             description='Environment: a registry name (worlds/<name>/) or a '
                         'path to a world directory. backend:=real uses it for '
