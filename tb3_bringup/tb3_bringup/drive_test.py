@@ -437,8 +437,19 @@ class DriveTest(Node):
         """
         if not self.samples:
             return None
-        a, b = self.samples[0], self.samples[-1]
-        truth = 'gx' in a
+        # Over the samples that CARRY ground truth, not over all of them, and
+        # decided the same way _summarise decides it. /odom and
+        # /ground_truth/odom are separate subscriptions: wait_for_odom() waits
+        # for the first, so on a backend where the second arrives a beat later
+        # the opening sample has no 'gx'. Reading the flag off sample[0] alone
+        # threw away ground truth for a whole run over one message -- observed
+        # on isaacsim sweep_r3, 2026-09-20, where every phase had a truth_d and
+        # `net` still said '/odom (NOT truth)'. The run is stationary in
+        # settle_pre while this resolves, so the trimmed span loses no motion.
+        truth_samples = [s for s in self.samples if 'gx' in s]
+        truth = len(truth_samples) > 1
+        span = truth_samples if truth else self.samples
+        a, b = span[0], span[-1]
         x0, y0 = (a['gx'], a['gy']) if truth else (a['x'], a['y'])
         x1, y1 = (b['gx'], b['gy']) if truth else (b['x'], b['y'])
         yaw0 = a['gyaw'] if truth else a['yaw']
@@ -447,7 +458,7 @@ class DriveTest(Node):
         # 4*pi and `square` turns 2*pi, and both wrap to nearly nothing.
         dyaw = sum(math.atan2(math.sin(q[key] - p[key]),
                               math.cos(q[key] - p[key]))
-                   for p, q in zip(self.samples, self.samples[1:]))
+                   for p, q in zip(span, span[1:]))
         dx, dy = x1 - x0, y1 - y0
         c, s_ = math.cos(-yaw0), math.sin(-yaw0)
         return {

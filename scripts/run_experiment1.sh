@@ -28,13 +28,24 @@ WORLD=empty_stage
 
 case "$BACKEND" in
   gazebo)   SETTLE=35 ;;
-  isaacsim) SETTLE=150 ;;   # Kit takes minutes, not seconds, to reach a stage
+  isaacsim) SETTLE=20 ;;    # measured ~12 s to a playing stage, 2026-09-20
   *) echo "run_experiment1.sh: backend must be gazebo or isaacsim" >&2; exit 2 ;;
 esac
 
 # The matrix. Repeats per the README: 3 for the diagnostic sequences, 5 each
 # way for UMBmark, which is its own prescription.
-MATRIX="sweep:3 line:3 spin_cw:3 spin_ccw:3 square_cw:5 square_ccw:5"
+#
+# Overridable by a third argument, for resuming a matrix that died partway:
+#
+#   run_experiment1.sh isaacsim 2026-09-20 "square_cw:5 square_ccw:5"
+#
+# Resume by whole SEQUENCES, not by repeat index. A sequence's repeats are what
+# its standard deviation is computed over, so splitting them across two
+# simulator launches puts a launch boundary inside one number -- and for the
+# UMBmark squares, the CW/CCW comparison is the entire point of running both.
+# Re-running r1..r3 of a sequence to get r4..r5 costs minutes; a caveat in the
+# results costs a reader.
+MATRIX=${3:-"sweep:3 line:3 spin_cw:3 spin_ccw:3 square_cw:5 square_ccw:5"}
 
 # `set -u` off across this one line: colcon's generated setup.bash reads
 # COLCON_TRACE unguarded and aborts the script under -u before anything
@@ -63,7 +74,18 @@ ros2 launch tb3_bringup bringup.launch.py \
     backend:="$BACKEND" world:="$WORLD" headless:=true rviz:=false \
     > "/tmp/exp1_${BACKEND}.log" 2>&1 &
 LAUNCH=$!
-trap 'kill $LAUNCH 2>/dev/null || true; pkill -f "ros2 launch" 2>/dev/null || true' EXIT
+# Kit is NOT a child of `ros2 launch` in any way that dies with it: killing the
+# launch on 2026-09-20 left turtlebot3_isaacsim.py playing a stage with nobody
+# driving it, which the stray check then refuses on the next run. Kill it by
+# name too, and give it a moment before -9.
+cleanup() {
+  kill $LAUNCH 2>/dev/null || true
+  pkill -f "ros2 launch" 2>/dev/null || true
+  pkill -f "turtlebot3_isaacsim.py" 2>/dev/null || true
+  sleep 3
+  pkill -9 -f "turtlebot3_isaacsim.py" 2>/dev/null || true
+}
+trap cleanup EXIT
 sleep "$SETTLE"
 
 for entry in $MATRIX; do
