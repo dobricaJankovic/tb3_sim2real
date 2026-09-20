@@ -26,6 +26,38 @@
 - **`ROS_DOMAIN_ID` mismatch.** The stock TurtleBot3 image hardcodes `30` in
   `.bashrc`; Isaac Sim defaults to `0`. Different domains = total silence, no
   error. Set it explicitly for both services (compose does).
+- **Stale Fast-DDS shared memory: nodes that start, print nothing, and never
+  join the graph.** Found 2026-09-20, and it is the live one — the uid entry
+  below it is history. Fast DDS keeps `fastrtps_port<N>`,
+  `fastrtps_port<N>_el` and `sem.fastrtps_port<N>_mutex` under `/dev/shm`, one
+  set per port. A participant killed without closing — a Ctrl-C'd `ros2
+  launch` that orphans its nodes, a killed `gzserver`, a container torn down
+  mid-run — leaves those behind and can leave the **mutex held**. The next
+  participant that hashes onto that port blocks forever taking it, *before*
+  rclcpp emits its first log line.
+
+  So the process is alive, `ps` shows its main thread in `hrtimer_nanosleep`,
+  its `/root/.ros/log/<node>_<pid>.log` is **zero bytes**, and it is absent
+  from `ros2 node list`. All you see downstream is `[lifecycle_manager]
+  Waiting for service map_server/get_state...` forever. `ros2 topic list`
+  returning **nothing at all** while `rqt_graph` shows everything is the same
+  bug with the `ros2` daemon as its victim — `--no-daemon` is the one-line
+  discriminator.
+
+  It is size-dependent, which is what makes it look like a Nav2 bug: `backend:=`
+  alone is four participants and usually gets lucky, `nav:=true` adds eleven at
+  once and some of them lose. It accumulates because `docker-compose.yml`
+  mounts `- /dev:/dev`, so `/dev/shm` inside **is the host's** and survives
+  `docker compose down`; 546 segments dating back four days is what the first
+  occurrence looked like.
+
+  **Fix:** `scripts/dds_clean.sh --kill`. It kills orphans, removes only the
+  `fastrtps_*` objects (Isaac's `carb-*` are not ours to touch), and stops the
+  daemon. Nothing about it reaches the real robot — shared memory is a
+  same-host transport and the robot is a second machine — but `/dev/shm` is
+  shared with the host, whose own Jazzy ROS the container cannot see, so stop
+  that too. The script's header has the rest.
+
 - **Fast-DDS shared memory across containers running as different uids.**
   *Historical — it cannot happen in the single-container layout, and the
   UDP-only workaround was removed on 2026-09-13. Keep reading only if you have

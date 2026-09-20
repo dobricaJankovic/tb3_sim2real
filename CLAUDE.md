@@ -50,7 +50,10 @@ scripts/              workspace.sh (vcs import), build_images.sh,
                       save_map.py (a SLAM map -> worlds/<name>/, the only
                       supported destination),
                       check_worlds.py (the drift check), snapshot.py /
-                      snapshot_gazebo.py (render either backend headless)
+                      snapshot_gazebo.py (render either backend headless),
+                      dds_clean.sh (stale /dev/shm Fast DDS segments are what
+                      make nodes start, log NOTHING and never join the graph --
+                      run it when a launch hangs with no error)
 measurements/         recorded backend comparisons. `ros2 run tb3_bringup
                       drive_test` is the instrument -- ONE instrument for all
                       three backends, because a per-backend script would be a

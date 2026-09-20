@@ -14,6 +14,14 @@ ros2 topic list       # /parameter_events and /rosout, nothing else
 No error, no warning, on either machine. `ROS_DOMAIN_ID` is right, both are on
 Humble, ping works, SSH works.
 
+**First rule out the local one.** `ros2 topic list` coming back with only
+`/parameter_events` and `/rosout` — or with *nothing at all* — also happens with
+no robot and no network involved, when stale Fast DDS segments in `/dev/shm`
+wedge the `ros2` daemon. `ros2 topic list --no-daemon` separates the two in one
+line: if that works and the plain one does not, it is not this document, it is
+`scripts/dds_clean.sh` (docs/troubleshooting.md). The same rot hangs Nav2 nodes
+silently, so it is worth clearing before blaming the router.
+
 DDS discovers participants by announcing them to the multicast address
 `239.255.0.1`. **No router forwards multicast between subnets** unless someone
 has deliberately configured it, and campus networks do not. SSH and ping are

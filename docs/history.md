@@ -2337,3 +2337,64 @@ simulator is open.
 of which persist in named volumes across container restarts. Comparing a
 known-good run against a failing one, line for line, is what located the stall
 — before anything was launched.
+
+## 2026-09-20 — `nav:=true` hangs, and it was never Nav2
+
+**Symptom.** `backend:=gazebo|isaacsim world:=<any>` came up fine; adding
+`nav:=true` (or `rviz:=true`) produced a launch that never finished and no
+error. Separately, `ros2 topic list` in a shell returned **nothing at all**
+while `rqt_graph` on the same `ROS_DOMAIN_ID=30` showed the whole graph.
+
+**Both were one bug: stale Fast DDS shared memory in `/dev/shm`.** 546
+`fastrtps_port*` segments and `sem.fastrtps_port*_mutex` objects, oldest four
+days. A participant killed without closing can leave its port mutex held; the
+next one that hashes onto that port blocks forever, and it blocks *before*
+rclcpp logs anything. `ros2 topic list` vs `--no-daemon` was the discriminator
+on the daemon half; on the Nav2 half the tell was `map_server` alive with its
+main thread in `hrtimer_nanosleep`, a **zero-byte**
+`/root/.ros/log/map_server_<pid>.log`, and no entry in `ros2 node list`, while
+`lifecycle_manager_localization` printed `Waiting for service
+map_server/get_state...` forever.
+
+**Why `nav:=true` specifically.** Not the flag — the participant count. The
+backend alone is four and usually gets lucky; `nav:=true` adds eleven at once
+and `map_server`, `amcl`, `controller_server`, `bt_navigator`,
+`behavior_server`, `waypoint_follower` and `velocity_smoother` all lost.
+`planner_server`, `smoother_server` and `global_costmap` came up in the same
+run, which is what made it look like a Nav2 configuration problem.
+
+**What was ruled out first**, all of it innocent: the maps are mounted and
+readable (`/worlds/turtlebot3_world/map/map.pgm`, 384x384 @ 0.05),
+`pin_initial_pose` writes valid YAML, and `map_server` started **by hand with
+the exact params file from the failing run** printed its banner instantly and
+configured normally. That last check is the one that moved the investigation
+off the launch file.
+
+**Why it accumulates here.** `docker-compose.yml` mounts `- /dev:/dev`, so
+`/dev/shm` inside the container is the host's and survives `docker compose
+down`. Every Ctrl-C'd launch orphans its nodes — three separate aborted runs'
+`map_server`/`amcl` were still alive when this was found — and each one
+ratchets the count.
+
+**Fix.** `scripts/dds_clean.sh`, new: refuses while ROS is running (`--kill`
+to stop orphans first), removes only `fastrtps_*` and `sem.fastrtps_*`, leaves
+Isaac's `carb-*` alone, kills the `ros2` daemon rather than asking it politely
+— `ros2 daemon stop` goes through the XML-RPC socket a wedged daemon is not
+answering on, and dies with `TimeoutError: [Errno 110]`. After clearing,
+the identical `nav:=true` command reached `Managed nodes are active` on both
+lifecycle managers in about four seconds, with AMCL seeded from the manifest
+(`Setting pose (0.000000): -2.000 -0.500 0.000`).
+
+**Real robot: unaffected.** Shared memory is a same-host transport and the
+robot is a second machine, so nothing here touches the link, `TB3_DDS_PEERS`
+or `/tmp/fastdds_peers.xml`, and no container recreate is needed. The caveat
+runs the other way: `/dev/shm` is shared with the host, whose own Jazzy ROS the
+container cannot see (no `pid: host`), so that has to be down too — deleting a
+segment under a live participant reproduces the locator trap in
+docs/network.md, robot topics listed and local nodes missing.
+
+**Open, and now suspect.** The `rviz:=true` / Isaac Sim hang recorded on
+2026-09-19 has the same signature and the same trigger (one more participant),
+and the GPU explanation in `bringup.launch.py` was never demonstrated. Retest
+`rviz:=true` on a cleared `/dev/shm` before trusting the `rviz` default of
+false as a real finding.
